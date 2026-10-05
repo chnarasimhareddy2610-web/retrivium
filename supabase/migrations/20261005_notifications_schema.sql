@@ -43,7 +43,10 @@ create policy "notifications: user update own"
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 
--- Authenticated users / system triggers can insert notifications
-create policy "notifications: authenticated insert"
-  on notifications for insert
-  with check (auth.role() = 'authenticated');
+-- No INSERT policy: client-side notification creation is denied.
+-- Notifications are created only by the SECURITY DEFINER trigger
+-- create_claim_outcome_notification() (see 20261005_notifications_trigger.sql),
+-- which runs as the table owner and is exempt from RLS.
+-- The former "authenticated insert" policy was removed by
+-- 20261005z_notifications_insert_lockdown.sql because it allowed any
+-- logged-in user to insert a notification for any user_id.

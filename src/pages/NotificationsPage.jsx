@@ -7,7 +7,6 @@ import {
   markAllNotificationsRead,
   normalizeDbNotification,
 } from "../lib/notificationService";
-import { mockNotifications } from "../data/dummyData";
 
 async function loadNotificationsData(userId, setDbNotes, setError, setLoading) {
   if (!userId) {
@@ -67,8 +66,9 @@ export default function NotificationsPage() {
     }
   };
 
-  // Combine real DB notifications with mock fallback if user has no DB notifications yet
-  const notifications = dbNotes.length > 0 ? dbNotes : mockNotifications;
+  // Real DB notifications only — errors surface via the banner above,
+  // never silently masked by mock data.
+  const notifications = dbNotes;
 
   return (
     <div className="w-full max-w-3xl mx-auto px-4 md:px-6 py-6 pb-24">
@@ -93,6 +93,16 @@ export default function NotificationsPage() {
         <div className="py-12 flex flex-col items-center justify-center gap-3">
           <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
           <p className="text-body-sm text-on-surface-variant">Loading notifications…</p>
+        </div>
+      ) : error ? (
+        <div className="py-12 flex flex-col items-center justify-center gap-3 bg-surface-container-lowest border border-outline-variant/20 rounded-xl">
+          <span className="material-symbols-outlined text-[28px] text-on-surface-variant">cloud_off</span>
+          <p className="text-body-md text-on-surface-variant">Could not load notifications</p>
+        </div>
+      ) : notifications.length === 0 ? (
+        <div className="py-12 flex flex-col items-center justify-center gap-3 bg-surface-container-lowest border border-outline-variant/20 rounded-xl">
+          <span className="material-symbols-outlined text-[28px] text-on-surface-variant">notifications_off</span>
+          <p className="text-body-md text-on-surface-variant">No notifications yet</p>
         </div>
       ) : (
         <div className="bg-surface-container-lowest border border-outline-variant/20 rounded-xl overflow-hidden shadow-sm flex flex-col">

@@ -1,0 +1,27 @@
+-- ============================================================
+-- Retrivium — Notifications INSERT Lockdown
+-- Migration: 20261005z_notifications_insert_lockdown
+-- (the "z" prefix keeps this file sorting AFTER the schema and
+-- trigger migrations so a fresh install always ends locked down)
+-- Target: Supabase (PostgreSQL 15+)
+-- Requires: 20261005_notifications_schema.sql,
+--           20261005_notifications_trigger.sql
+-- ============================================================
+-- The original schema allowed ANY authenticated user to INSERT a
+-- notification row for ANY user_id, so a logged-in client could
+-- spoof notifications to other users.
+--
+-- The frontend never inserts notifications (notificationService only
+-- selects and updates), and claim-outcome notifications are created
+-- by create_claim_outcome_notification(), a SECURITY DEFINER trigger
+-- function owned by `postgres` — the same role that owns the
+-- notifications table. With force_row_security off, RLS does not
+-- apply to the table owner, so the trigger keeps inserting rows even
+-- with no INSERT policy for client roles.
+--
+-- Dropping the policy makes client-side INSERT fail closed (RLS
+-- default-deny) for every user, including self-targeted inserts,
+-- while the database-side trigger remains the only notification
+-- creation path.
+
+drop policy if exists "notifications: authenticated insert" on notifications;
