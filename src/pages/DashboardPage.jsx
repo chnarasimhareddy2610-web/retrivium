@@ -2,14 +2,7 @@ import { Link } from "react-router-dom";
 import { useAppData } from "../context/AppDataContext";
 
 export default function DashboardPage() {
-  const { currentUser, items, dbLoaded } = useAppData();
-
-  const totalCount = items.length;
-  const foundCount = items.filter((i) => i.status === "Found").length;
-  const lostCount = items.filter((i) => i.status === "Lost").length;
-  const myReportsCount = items.filter(
-    (i) => i.reportedBy === currentUser.id
-  ).length;
+  const { currentUser, items, dbLoaded, totalCount, foundCount, lostCount, myReportsCount } = useAppData();
   const recentItems = dbLoaded ? items.slice(0, 3) : [];
 
   return (
@@ -92,7 +85,7 @@ export default function DashboardPage() {
           </Link>
         </div>
 
-        {/* Honest activity stats — computed from real DB items only */}
+        {/* Honest activity stats — computed from real DB items only, via AppDataContext */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 flex flex-col gap-4">
             <h3 className="text-headline-sm text-on-surface px-1">

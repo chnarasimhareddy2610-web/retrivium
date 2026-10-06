@@ -39,6 +39,15 @@ export function AppDataProvider({ children }) {
   // real campus reports.
   const items = dbLoaded ? dbItems : [];
 
+  // Item-derived summary counts — computed from `items` after it is
+  // declared, so nothing references `items` before its declaration.
+  const totalCount = items.length;
+  const foundCount = items.filter((i) => i.status === "Found").length;
+  const lostCount = items.filter((i) => i.status === "Lost").length;
+  const myReportsCount = items.filter(
+    (i) => i.reportedBy === currentUser.id,
+  ).length;
+
   // Load from DB when user logs in; clear on logout.
   const userId = user?.id;
   useEffect(() => {
@@ -94,7 +103,21 @@ export function AppDataProvider({ children }) {
   }, [currentUser.name]);
 
   return (
-    <AppDataContext.Provider value={{ items, dbItems, dbLoaded, addItem, addDbItem, refreshItems, currentUser }}>
+    <AppDataContext.Provider
+      value={{
+        items,
+        dbItems,
+        dbLoaded,
+        totalCount,
+        foundCount,
+        lostCount,
+        myReportsCount,
+        addItem,
+        addDbItem,
+        refreshItems,
+        currentUser,
+      }}
+    >
       {children}
     </AppDataContext.Provider>
   );
