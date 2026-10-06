@@ -1,7 +1,6 @@
 import { MapContainer, TileLayer, Marker, Popup, Circle } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
-import { useState } from "react";
 
 // Fix default marker icon issue in Webpack/Vite
 delete L.Icon.Default.prototype._getIconUrl;
@@ -31,8 +30,7 @@ const HOTSPOTS = [
   { name: "Parking Lot", lat: 12.9355, lng: 77.6120, count: 2 },
 ];
 
-function MapPanel({ items }) {
-  const [live] = useState(true);
+function MapPanel() {
   const center = [12.9340, 77.6105];
 
   return (
