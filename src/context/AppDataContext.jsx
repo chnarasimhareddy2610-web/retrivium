@@ -2,6 +2,7 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { useAuth } from "./AuthContext";
 import { fetchAllItems, normalizeDbItem } from "../lib/itemService";
+import { supabase } from "../lib/supabaseClient";
 
 const AppDataContext = createContext(null);
 
@@ -75,6 +76,82 @@ export function AppDataProvider({ children }) {
     if (!userId) return Promise.resolve();
     return loadItems(setDbItems, setDbLoaded);
   }, [userId]);
+
+  /**
+   * Keep the map + list fresh without a full-page reload.
+   *
+   * We attempt a Supabase Realtime subscription on the `items` table first.
+   * Realtime requires project-side enablement (realtime enabled + the table
+   * registered as a realtime source) which we cannot assume, so the
+   * subscription is wrapped in try/catch. If it fails, we fall back to a
+   * lightweight polling refresh (every 30s). Either way the map/list stay
+   * in sync with the latest DB state.
+   *
+   * Subscriptions and timers are cleaned up on logout / userId change.
+   */
+  useEffect(() => {
+    if (!userId) return;
+
+    // Polling fallback: refresh on a 30s cadence.
+    const POLL_MS = 30_000;
+    let realtimeActive = false;
+    let timerId = null;
+
+    const startPolling = () => {
+      timerId = window.setInterval(() => {
+        refreshItems().catch((err) => {
+          console.warn("Campus map refresh (poll) failed:", err?.message || err);
+        });
+      }, POLL_MS);
+    };
+
+    startPolling();
+
+    // Attempt a realtime subscription; if it succeeds, pause polling.
+    let channel = null;
+    try {
+      channel = supabase
+        .channel("items-map-sync")
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "items",
+          },
+          () => {
+            realtimeActive = true;
+            if (timerId) {
+              window.clearInterval(timerId);
+              timerId = null;
+            }
+            refreshItems().catch((err) => {
+              console.warn("Campus map refresh (realtime) failed:", err?.message || err);
+            });
+          }
+        )
+        .subscribe();
+    } catch (err) {
+      // Realtime not available — polling remains active.
+      console.warn("Campus map: realtime subscription unavailable, using polling:", err?.message || err);
+    }
+
+    // Periodic health check: if the channel drops, resume polling.
+    const heartbeat = window.setInterval(() => {
+      if (channel && !realtimeActive) {
+        // channel may have dropped; start polling again.
+        if (!timerId) startPolling();
+      }
+    }, POLL_MS);
+
+    return () => {
+      if (channel) {
+        supabase.removeChannel(channel).catch(() => {});
+      }
+      if (timerId) window.clearInterval(timerId);
+      if (heartbeat) window.clearInterval(heartbeat);
+    };
+  }, [userId, refreshItems]);
 
   /**
    * Legacy addItem — kept so nothing else breaks.

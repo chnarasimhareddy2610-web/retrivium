@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import FilterBar from "../components/search/FilterBar";
-import CampusSVGMap from "../components/map/CampusSVGMap";
+import CampusIncidentMap from "../components/map/CampusIncidentMap";
 import FeedList from "../components/feed/FeedList";
 import { useAppData } from "../context/AppDataContext";
 
@@ -10,7 +10,6 @@ export default function BrowsePage() {
   const [viewMode, setViewMode] = useState("list");
   const [activeStatus, setActiveStatus] = useState("all");
   const [activeZone, setActiveZone] = useState("All Campus");
-  const [activeMarkerId, setActiveMarkerId] = useState(null);
 
   const totalCount = items.length;
   const foundCount = items.filter((i) => i.status === "Found").length;
@@ -26,23 +25,22 @@ export default function BrowsePage() {
       if (activeStatus !== "all" && activeStatus.toLowerCase() !== item.status.toLowerCase()) {
         return false;
       }
-      // Zone filter
+      // Zone filter (case-insensitive, since item.location may be free-text cased any way)
       if (activeZone !== "All Campus") {
-         if (activeZone === "Central Library" && !item.location.includes("Library")) return false;
-         if (activeZone === "CS Block" && !item.location.includes("CS Block")) return false;
-         if (activeZone === "Main Canteen" && !item.location.includes("Canteen")) return false;
-         if (activeZone === "Auditorium" && !item.location.includes("Auditorium")) return false;
-         if (activeZone === "Hostels" && !item.location.includes("Hostels")) return false;
+        const loc = item.location.toLowerCase();
+         if (activeZone === "Central Library" && !loc.includes("library")) return false;
+         if (activeZone === "CS Block" && !loc.includes("cs block")) return false;
+         if (activeZone === "Main Canteen" && !loc.includes("canteen")) return false;
+         if (activeZone === "Auditorium" && !loc.includes("auditorium")) return false;
+         if (activeZone === "Hostels" && !loc.includes("hostel")) return false;
       }
       return true;
     });
   }, [items, searchQuery, activeStatus, activeZone]);
 
-  const handleFocusItem = (markerId) => {
-    setActiveMarkerId(markerId);
-    if (viewMode === "list") {
-      setViewMode("map");
-    }
+  const handleFocusItem = (itemId) => {
+    // Focus the item in the list/map by id. Returns true if a match was found.
+    return filteredItems.some((item) => item.id === itemId);
   };
 
   return (
@@ -60,18 +58,20 @@ export default function BrowsePage() {
         foundCount={foundCount}
         lostCount={lostCount}
       />
-      
+
       {viewMode === "map" ? (
-        <CampusSVGMap 
-          activeMarkerId={activeMarkerId} 
-          setActiveMarkerId={setActiveMarkerId} 
+        <CampusIncidentMap
+          height="100%"
+          activeZone={activeZone}
+          items={filteredItems}
+          onFocusItem={handleFocusItem}
         />
       ) : (
         <div className="w-full max-w-3xl mx-auto py-6">
-          <FeedList 
-            items={filteredItems} 
-            onFocusItem={handleFocusItem} 
-            activeMarkerId={activeMarkerId} 
+          <FeedList
+            items={filteredItems}
+            onFocusItem={handleFocusItem}
+            activeMarkerId={null}
           />
         </div>
       )}
