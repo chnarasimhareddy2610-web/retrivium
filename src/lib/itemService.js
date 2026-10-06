@@ -178,5 +178,6 @@ export function normalizeDbItem(row) {
     image_path: row.image_path || null,
     markerId: null,
     _fromDb: true,
+    created_at: row.created_at || null,
   };
 }
