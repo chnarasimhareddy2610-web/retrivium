@@ -1,9 +1,12 @@
 import { useState } from "react";
+import { ZONES } from "../../data/dummyData";
 
-export default function FilterBar({ searchQuery, setSearchQuery, viewMode, setViewMode, activeStatus, setActiveStatus, activeZone, setActiveZone }) {
-  const [zones] = useState([
-    "All Campus", "Central Library", "CS Block", "Main Canteen", "Auditorium", "Hostels"
-  ]);
+export default function FilterBar({
+  searchQuery, setSearchQuery, viewMode, setViewMode,
+  activeStatus, setActiveStatus, activeZone, setActiveZone,
+  totalCount = 0, foundCount = 0, lostCount = 0,
+}) {
+  const [zones] = useState(ZONES);
 
   return (
     <div className="sticky top-0 z-30 bg-surface-container-lowest shadow-sm flex flex-col w-full">
@@ -59,7 +62,7 @@ export default function FilterBar({ searchQuery, setSearchQuery, viewMode, setVi
           }`}
         >
           <span>All Items</span>
-          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-code-sm ${activeStatus === 'all' ? 'bg-on-primary/20' : 'bg-surface-container-high'}`}>42</span>
+          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-code-sm ${activeStatus === 'all' ? 'bg-on-primary/20' : 'bg-surface-container-high'}`}>{totalCount}</span>
         </button>
         <button
           onClick={() => setActiveStatus("found")}
@@ -69,7 +72,7 @@ export default function FilterBar({ searchQuery, setSearchQuery, viewMode, setVi
         >
           <span className="w-1.5 h-1.5 rounded-full bg-tertiary"></span>
           <span>Found Only</span>
-          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-code-sm ${activeStatus === 'found' ? 'bg-on-primary/20' : 'bg-surface-container-high'}`}>26</span>
+          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-code-sm ${activeStatus === 'found' ? 'bg-on-primary/20' : 'bg-surface-container-high'}`}>{foundCount}</span>
         </button>
         <button
           onClick={() => setActiveStatus("lost")}
@@ -79,7 +82,7 @@ export default function FilterBar({ searchQuery, setSearchQuery, viewMode, setVi
         >
           <span className="w-1.5 h-1.5 rounded-full bg-error"></span>
           <span>Lost Only</span>
-          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-code-sm ${activeStatus === 'lost' ? 'bg-on-primary/20' : 'bg-surface-container-high'}`}>16</span>
+          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-code-sm ${activeStatus === 'lost' ? 'bg-on-primary/20' : 'bg-surface-container-high'}`}>{lostCount}</span>
         </button>
         <div className="h-4 w-px bg-surface-container-high flex-shrink-0 mx-1"></div>
         <span className="font-code-sm text-[11px] text-outline flex items-center gap-1 flex-shrink-0 pr-1">
@@ -108,7 +111,7 @@ export default function FilterBar({ searchQuery, setSearchQuery, viewMode, setVi
       <div className="w-full bg-surface-container-low px-margin-mobile py-1 flex items-center justify-between font-label-sm text-label-sm text-on-surface-variant">
         <div className="flex items-center gap-1.5">
           <span className="w-2 h-2 rounded-full bg-tertiary"></span>
-          <span className="font-body-sm text-body-sm text-on-surface-variant font-medium">42 active reports across campus</span>
+          <span className="font-body-sm text-body-sm text-on-surface-variant font-medium">{totalCount} active reports across campus</span>
         </div>
         <div className="flex items-center gap-1 text-outline font-body-sm text-body-sm">
           <span className="material-symbols-outlined text-[14px] text-primary">near_me</span>

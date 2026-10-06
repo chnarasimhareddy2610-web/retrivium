@@ -1,6 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
-import { initialItems } from "../data/dummyData";
 import { useAuth } from "./AuthContext";
 import { fetchAllItems, normalizeDbItem } from "../lib/itemService";
 
@@ -35,8 +34,10 @@ export function AppDataProvider({ children }) {
     role: profile?.role || "Student / Staff",
   };
 
-  // Merge: real DB items appear first, dummy data trails as demo fallback.
-  const items = dbLoaded ? [...dbItems, ...initialItems] : initialItems;
+  // Real DB items are the authoritative campus feed. The deprecated
+  // mock feed is no longer merged in, so fake demo items never appear as
+  // real campus reports.
+  const items = dbLoaded ? dbItems : [];
 
   // Load from DB when user logs in; clear on logout.
   const userId = user?.id;

@@ -12,6 +12,10 @@ export default function BrowsePage() {
   const [activeZone, setActiveZone] = useState("All Campus");
   const [activeMarkerId, setActiveMarkerId] = useState(null);
 
+  const totalCount = items.length;
+  const foundCount = items.filter((i) => i.status === "Found").length;
+  const lostCount = items.filter((i) => i.status === "Lost").length;
+
   const filteredItems = useMemo(() => {
     return items.filter(item => {
       // Name search
@@ -52,6 +56,9 @@ export default function BrowsePage() {
         setActiveStatus={setActiveStatus}
         activeZone={activeZone}
         setActiveZone={setActiveZone}
+        totalCount={totalCount}
+        foundCount={foundCount}
+        lostCount={lostCount}
       />
       
       {viewMode === "map" ? (

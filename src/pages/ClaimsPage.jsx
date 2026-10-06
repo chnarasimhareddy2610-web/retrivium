@@ -10,7 +10,6 @@ import {
   normalizeDbClaim,
 } from "../lib/claimService";
 import ItemImage from "../components/common/ItemImage";
-import { mockClaims } from "../data/dummyData";
 
 /**
  * Fetch claims for the current user's role.
@@ -201,13 +200,10 @@ export default function ClaimsPage() {
     }
   };
 
-  // Security Desk always works from live DB claims (no demo fixtures with fake ids).
-  // Students keep the existing demo fallback while they have no claims of their own.
-  const displayClaims = isSecurity
-    ? dbClaims
-    : dbClaims.length > 0
-    ? dbClaims
-    : mockClaims;
+  // Both students and Security Desk work from live DB claims only — the mock
+  // claim fixtures are no longer used as live data. When the real user has no
+  // claims, the empty-state UI below renders the honest prompt.
+  const displayClaims = dbClaims;
 
   return (
     <div className="w-full max-w-5xl mx-auto px-4 md:px-6 py-6 pb-24">
