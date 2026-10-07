@@ -159,9 +159,9 @@ export default function ClaimsPage() {
       setDbClaims((prev) =>
         prev.map((c) => (c.id === reviewClaim.id ? normalized : c))
       );
-      // Item status changed in the DB (resolved) — sync shared item state.
+      // Custody stage advanced in the DB — sync shared item state.
       refreshItems();
-      setReviewSuccessMsg("Claim APPROVED. Item status updated to Resolved.");
+      setReviewSuccessMsg("Claim APPROVED. Item is ready for handover at the Security Desk.");
       setTimeout(() => {
         setReviewModalOpen(false);
         setReviewClaim(null);

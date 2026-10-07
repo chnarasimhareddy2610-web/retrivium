@@ -140,6 +140,9 @@ export async function createReport({ userId, name, location, status, category, d
     zone: zone || null,
     latitude: lat,
     longitude: lng,
+    // Custody stage: a freshly reported found item starts waiting at the
+    // Security Desk. Lost items have no custody stage (NULL).
+    recovery_state: dbStatus === "found" ? "at_security" : null,
     image_path: imagePath,
     reference_tag: referenceTag,
     custody_info: dbStatus === "found" ? "Held at Security Desk" : null,
@@ -180,6 +183,9 @@ export function normalizeDbItem(row) {
     zone: row.zone || null,
     latitude: coords.latitude,
     longitude: coords.longitude,
+    // Custody/recovery stage (at_security | claim_approved | handed_over).
+    // NULL for lost items and for rows created before the lifecycle existed.
+    recoveryState: row.recovery_state || null,
     status: uiStatus,
     category: row.category || "Other",
     date: row.created_at

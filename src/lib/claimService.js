@@ -119,7 +119,14 @@ export async function fetchAllClaimsForSecurity() {
 
 /**
  * Approve a claim by Security / Admin.
- * Updates claim status to 'approved', sets reviewed_by, and marks item as 'resolved'.
+ * Updates claim status to 'approved', sets reviewed_by, and (server-side)
+ * moves the item into the READY FOR HANDOVER custody stage.
+ *
+ * Note: approval no longer marks the item resolved. Under the recovery
+ * lifecycle the item resolves when it is physically handed over via the
+ * complete_handover() RPC. The item transition itself is performed by the
+ * `claims_recovery_transition` trigger, so it happens no matter which client
+ * path approves the claim.
  */
 export async function approveClaim({ claimId, itemId, reviewerId }) {
   if (!claimId || !reviewerId) {
@@ -158,25 +165,26 @@ export async function approveClaim({ claimId, itemId, reviewerId }) {
 
   if (claimError) throw claimError;
 
-  // 2. Update item status to 'resolved' (and set resolved_at timestamp)
+  // 2. Read the item back: the `claims_recovery_transition` trigger has
+  //    already advanced its custody stage to 'claim_approved' (ready for
+  //    handover). Returning it lets callers refresh UI state without
+  //    assuming what happened server-side.
+  let updatedItem = null;
   if (itemId) {
-    const { data: resolvedRows, error: itemError } = await supabase
+    const { data: itemRow, error: itemError } = await supabase
       .from("items")
-      .update({
-        status: "resolved",
-        resolved_at: new Date().toISOString(),
-      })
+      .select("id, status, recovery_state")
       .eq("id", itemId)
-      .select("id");
+      .maybeSingle();
 
     if (itemError) {
-      console.warn("Failed to update item to resolved:", itemError.message);
-    } else if (!resolvedRows?.length) {
-      console.warn("Item was not resolved: no item row matched (RLS or missing id).");
+      console.warn("Could not refresh item after approval:", itemError.message);
+    } else {
+      updatedItem = itemRow || null;
     }
   }
 
-  return updatedClaim;
+  return { ...updatedClaim, updatedItem };
 }
 
 /**

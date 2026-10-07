@@ -1,4 +1,5 @@
 import ItemImage from "../common/ItemImage";
+import { recoveryLabel } from "../../lib/handoverService";
 
 export default function FeedCard({ item, onClickFocus }) {
   const isFound = item.status === "Found";
@@ -27,6 +28,14 @@ export default function FeedCard({ item, onClickFocus }) {
               {item.status.toUpperCase()}
             </span>
             <span className="font-code-sm text-[11px] text-outline">{item.tag || "UNK-0000"}</span>
+            {recoveryLabel(item.recoveryState) && (
+              <span
+                className="px-1.5 py-0.5 rounded font-label-sm text-[10px] font-medium bg-surface-container text-on-surface-variant"
+                title="Recovery stage"
+              >
+                {recoveryLabel(item.recoveryState)}
+              </span>
+            )}
           </div>
           <h4 className="font-label-lg text-label-lg text-on-surface truncate font-semibold mt-0.5">{item.name}</h4>
           <span className="font-body-sm text-body-sm text-on-surface-variant truncate">{item.location}</span>

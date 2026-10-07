@@ -115,7 +115,7 @@ export default function NotificationsPage() {
               icon = "troubleshoot";
               iconColor = "text-primary";
               bgColor = "bg-primary-container/20";
-            } else if (note.type === "claim_approved" || note.type === "item_returned") {
+            } else if (note.type === "claim_approved" || note.type === "item_returned" || note.type === "item_handed_over") {
               icon = "verified";
               iconColor = "text-tertiary";
               bgColor = "bg-tertiary-container/20";

@@ -164,6 +164,7 @@ export function AppDataProvider({ children }) {
       zone: newItem.zone || null,
       latitude: newItem.latitude ?? null,
       longitude: newItem.longitude ?? null,
+      recoveryState: newItem.recoveryState || null,
       status: newItem.status || "Lost",
       category: newItem.category || "Other",
       date: new Date().toLocaleDateString("en-IN", {
