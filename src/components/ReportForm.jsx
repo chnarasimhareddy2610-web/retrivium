@@ -1,5 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import { getProfanityError } from "../data/profanity";
+import { hasValidCoords } from "../lib/geo";
+import { ZONES } from "../data/dummyData";
+
+// Campus zones a reporter can pick manually as a fallback when they
+// decline/omit GPS. Mirrors the DB campus_zone enum (minus the UI-only
+// "All Campus" filter value, plus the enum's "Other").
+const CAMPUS_ZONES = [...ZONES.filter((z) => z !== "All Campus"), "Other"];
 
 function Label({ children }) {
   return (
@@ -40,6 +47,14 @@ function ReportForm({ onSubmit, addItem, defaultStatus = "Lost" }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [location, setLocation] = useState("");
+  // Optional manual campus zone (nullable) — used as the map fallback when
+  // no GPS coordinates are captured.
+  const [zone, setZone] = useState("");
+  // Optional browser GPS capture. `coords` stays null until the user
+  // explicitly requests their location and it resolves successfully.
+  const [coords, setCoords] = useState(null);
+  const [geoStatus, setGeoStatus] = useState("idle"); // idle | loading | success | error
+  const [geoError, setGeoError] = useState("");
   const [status, setStatus] = useState(defaultStatus);
   const [prevDefaultStatus, setPrevDefaultStatus] = useState(defaultStatus);
 
@@ -102,6 +117,58 @@ function ReportForm({ onSubmit, addItem, defaultStatus = "Lost" }) {
     if (locationError) setLocationError(validateLocation(e.target.value));
   };
 
+  // Explicit, user-triggered GPS request. Permission is NEVER requested on
+  // mount — only when the reporter clicks "Use my current location".
+  const handleUseLocation = () => {
+    setGeoError("");
+
+    if (typeof navigator === "undefined" || !("geolocation" in navigator)) {
+      setGeoStatus("error");
+      setGeoError("Location is not supported by this browser. Choose a campus zone instead.");
+      return;
+    }
+
+    setGeoStatus("loading");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos && pos.coords ? pos.coords.latitude : null;
+        const lng = pos && pos.coords ? pos.coords.longitude : null;
+        const accuracy = pos && pos.coords ? pos.coords.accuracy : null;
+
+        if (!hasValidCoords(lat, lng)) {
+          setCoords(null);
+          setGeoStatus("error");
+          setGeoError("Received invalid coordinates. Try again or choose a campus zone instead.");
+          return;
+        }
+
+        setCoords({ latitude: lat, longitude: lng, accuracy });
+        setGeoStatus("success");
+      },
+      (err) => {
+        setCoords(null);
+        setGeoStatus("error");
+        const code = err && err.code;
+        if (code === 1) {
+          setGeoError("Location permission denied. You can still submit by choosing a campus zone manually.");
+        } else if (code === 2) {
+          setGeoError("Your position is unavailable right now. Choose a campus zone instead.");
+        } else if (code === 3) {
+          setGeoError("Location request timed out. Try again or choose a campus zone instead.");
+        } else {
+          setGeoError("Could not get your location. You can still submit by choosing a campus zone.");
+        }
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  };
+
+  const handleClearLocation = () => {
+    setCoords(null);
+    setGeoStatus("idle");
+    setGeoError("");
+  };
+
   const handleImageChange = (e) => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
@@ -144,6 +211,10 @@ function ReportForm({ onSubmit, addItem, defaultStatus = "Lost" }) {
     setName("");
     setDescription("");
     setLocation("");
+    setZone("");
+    setCoords(null);
+    setGeoStatus("idle");
+    setGeoError("");
     setCategory("Other");
     setStatus(defaultStatus);
     setNameError("");
@@ -179,6 +250,11 @@ function ReportForm({ onSubmit, addItem, defaultStatus = "Lost" }) {
         status,
         category,
         imageFile: imageFileRef.current || null,
+        // Coordinates are persisted only when captured; submitting while the
+        // GPS request is still pending simply saves with null coordinates.
+        latitude: coords ? coords.latitude : null,
+        longitude: coords ? coords.longitude : null,
+        zone: zone || null,
       });
       resetForm();
       setSubmitted(true);
@@ -273,6 +349,114 @@ function ReportForm({ onSubmit, addItem, defaultStatus = "Lost" }) {
             }}
           />
           <FieldError msg={locationError} />
+        </div>
+
+        {/* Optional GPS capture + manual campus-zone fallback */}
+        <div>
+          <Label>Campus Position (Optional)</Label>
+          <div style={{
+            border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: "var(--radius-sm)",
+            background: "rgba(0,0,0,0.2)",
+            padding: "12px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "10px",
+          }}>
+            <p style={{ fontSize: "12px", color: "var(--text-muted)", margin: 0, lineHeight: 1.5 }}>
+              Add your exact position so this report lands precisely on the campus map. Optional — you can submit with just a campus zone.
+            </p>
+
+            {geoStatus === "success" && coords ? (
+              <div style={{
+                display: "flex", alignItems: "center", gap: "10px",
+                padding: "9px 11px",
+                background: "rgba(16,185,129,0.1)",
+                border: "1px solid rgba(16,185,129,0.3)",
+                borderRadius: "8px",
+              }}>
+                <span className="material-symbols-outlined" style={{ fontSize: "18px", color: "#34d399" }}>location_on</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontSize: "12.5px", color: "#34d399", fontWeight: 600, margin: 0 }}>Location captured</p>
+                  <p style={{ fontSize: "11px", color: "var(--text-muted)", margin: "2px 0 0 0", fontFamily: "var(--font-mono)" }}>
+                    {coords.latitude.toFixed(5)}, {coords.longitude.toFixed(5)}
+                    {typeof coords.accuracy === "number" ? ` · ±${Math.round(coords.accuracy)}m` : ""}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleClearLocation}
+                  style={{
+                    background: "rgba(255,255,255,0.06)",
+                    border: "1px solid rgba(255,255,255,0.15)",
+                    color: "var(--text-secondary)",
+                    borderRadius: "6px",
+                    padding: "5px 9px",
+                    fontSize: "12px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+            ) : geoStatus === "loading" ? (
+              <div style={{
+                display: "flex", alignItems: "center", gap: "9px",
+                padding: "9px 11px",
+                background: "rgba(6,182,212,0.08)",
+                border: "1px solid rgba(6,182,212,0.25)",
+                borderRadius: "8px",
+              }}>
+                <span style={{
+                  width: "14px", height: "14px", border: "2px solid var(--cyan)",
+                  borderTopColor: "transparent", borderRadius: "50%",
+                  display: "inline-block", animation: "spin 0.7s linear infinite",
+                }} />
+                <p style={{ fontSize: "12.5px", color: "var(--cyan)", margin: 0 }}>Getting your location…</p>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleUseLocation}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
+                  padding: "10px 12px",
+                  background: "rgba(6,182,212,0.12)",
+                  border: "1px solid rgba(6,182,212,0.35)",
+                  color: "var(--cyan)",
+                  borderRadius: "8px",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: "18px" }}>my_location</span>
+                {geoStatus === "error" ? "Try again" : "Use my current location"}
+              </button>
+            )}
+
+            {geoStatus === "loading" && (
+              <p style={{ fontSize: "11px", color: "var(--text-muted)", margin: 0, lineHeight: 1.5 }}>
+                You can still submit now — the report saves without coordinates if the location isn't ready.
+              </p>
+            )}
+
+            <FieldError msg={geoError} />
+
+            <div>
+              <Label>Choose campus zone manually</Label>
+              <select
+                style={{ ...inputStyle(false), cursor: "pointer", color: "var(--text-primary)" }}
+                value={zone}
+                onChange={(e) => setZone(e.target.value)}
+              >
+                <option value="" style={{ background: "#1e293b", color: "#f8fafc" }}>No zone (free-text location only)</option>
+                {CAMPUS_ZONES.map((z) => (
+                  <option key={z} value={z} style={{ background: "#1e293b", color: "#f8fafc" }}>{z}</option>
+                ))}
+              </select>
+            </div>
+          </div>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>

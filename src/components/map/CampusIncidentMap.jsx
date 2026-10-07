@@ -3,13 +3,16 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import { useAppData } from "../../context/AppDataContext";
 import { getSignedImageUrl } from "../../lib/itemService";
+import { hasValidCoords } from "../../lib/geo";
 
 // ---------------------------------------------------------------------------
-// Honest zone anchors.
-// Fixed zone-centroid points for the campus region. Used only to place markers
-// at a zone's general area — NOT precise GPS coordinates for any individual
-// report. The items table has no lat/lng, and we never invent precise
-// per-item coordinates. This is intentional and labeled on the map.
+// Honest placement, two tiers.
+//
+// 1. EXACT GPS — when a report carries valid latitude/longitude (captured with
+//    the reporter's consent), the marker sits at that exact position.
+// 2. ZONE ANCHOR — otherwise we place the marker at a fixed campus zone
+//    centroid. This is a zone's general area, NOT a precise location, and is
+//    labeled as such on the map. We never invent coordinates for a report.
 // ---------------------------------------------------------------------------
 const ZONE_CENTROIDS = {
   "Central Library": [12.9345, 77.6102],
@@ -89,6 +92,26 @@ function clusterIcon(count) {
   });
 }
 
+// Exact-GPS marker: a white ring with a colored core, visually distinct from the
+// solid zone-anchor pins so users can tell precise positions apart at a glance.
+function gpsIcon(status) {
+  const color = statusColor(status);
+  return L.divIcon({
+    className: "incident-marker incident-marker--gps",
+    html: `
+      <div style="position:relative;width:32px;height:32px;display:flex;align-items:center;justify-content:center;">
+        <span style="position:absolute;inset:0;border-radius:50%;background:rgba(6,182,212,0.18);"></span>
+        <span style="position:relative;display:flex;align-items:center;justify-content:center;width:24px;height:24px;background:#fff;border:3px solid ${color};border-radius:50%;box-shadow:0 3px 10px rgba(0,0,0,0.28),0 0 0 1px rgba(6,182,212,0.5);">
+          <span style="width:8px;height:8px;background:${color};border-radius:50%;"></span>
+        </span>
+      </div>
+    `,
+    iconSize: [32, 32],
+    iconAnchor: [16, 16],
+    popupAnchor: [0, -18],
+  });
+}
+
 // ---- Signed thumbnail helper (one request per item) -----------------------------
 
 function SignedThumb({ imagePath, name, size = 56 }) {
@@ -155,7 +178,7 @@ function SignedThumb({ imagePath, name, size = 56 }) {
 
 const ITEM_LINK = "/browse";
 
-function itemPopupContent(item) {
+function itemPopupContent(item, isGps = false) {
   const statusStyle =
     item.status === "Found"
       ? "rgba(16,185,129,0.16)"
@@ -190,6 +213,25 @@ function itemPopupContent(item) {
         <span style={{ marginLeft: "auto", fontSize: 11, color: "#475569", fontFamily: "JetBrains Mono, monospace" }}>
           {item.tag || "—"}
         </span>
+        {isGps && (
+          <span
+            title="Marker uses exact captured GPS coordinates"
+            style={{
+              marginLeft: 6,
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: "0.04em",
+              color: "#0891b2",
+              background: "rgba(6,182,212,0.14)",
+              border: "1px solid rgba(6,182,212,0.35)",
+              borderRadius: 999,
+              padding: "2px 6px",
+              lineHeight: "14px",
+            }}
+          >
+            GPS
+          </span>
+        )}
       </div>
 
       <div style={{ padding: "8px 10px 6px" }}>
@@ -374,6 +416,21 @@ function IndexedMarkers({ items }) {
   // visual separation — not precise item locations.
   const markers = items.reduce((acc, item) => {
     if (!item || !item.id) return acc;
+
+    // Tier 1: exact captured GPS coordinates when the report has them.
+    if (hasValidCoords(item.latitude, item.longitude)) {
+      acc.push({
+        key: item.id,
+        item,
+        position: [Number(item.latitude), Number(item.longitude)],
+        icon: gpsIcon(item.status),
+        isCluster: false,
+        isGps: true,
+      });
+      return acc;
+    }
+
+    // Tier 2: zone anchor with a tiny offset so same-zone pins stay separable.
     const zone = item.zone || "Other";
     const base = ZONE_CENTROIDS[zone];
     // Fall back to the "Other" centroid only if the zone is genuinely unknown;
@@ -386,15 +443,17 @@ function IndexedMarkers({ items }) {
       typeof base[1] === "number"
         ? base
         : ZONE_CENTROIDS.Other;
+    // Count only other zone-anchored pins at this exact centroid (GPS pins
+    // keep their precise positions and are never offset).
     const existing = acc.filter(
       (m) =>
+        !m.isGps &&
         Array.isArray(m.position) &&
         m.position.length >= 2 &&
         m.position[0] === resolvedBase[0] &&
         m.position[1] === resolvedBase[1]
     );
     const idx = existing.length;
-    // Tiny offset per item in the same zone so markers don't overlap exactly.
     const dlat = (idx % 3) * 0.00012;
     const dlng = (Math.floor(idx / 3) % 2) * 0.00012;
     acc.push({
@@ -403,13 +462,17 @@ function IndexedMarkers({ items }) {
       position: [resolvedBase[0] + dlat, resolvedBase[1] + dlng],
       icon: itemIcon(item.status, idx),
       isCluster: false,
+      isGps: false,
     });
     return acc;
   }, []);
 
   // Zone-level cluster: if a zone has more than one item, also render a single
   // cluster marker at the zone centroid listing the items in its popup.
+  // Exact-GPS items are excluded from zone clusters so their precise position
+  // is never hidden behind an aggregate anchor.
   const zoneGroups = items.reduce((acc, item) => {
+    if (!item || hasValidCoords(item.latitude, item.longitude)) return acc;
     const zone = item.zone || "Other";
     if (!acc.has(zone)) acc.set(zone, []);
     acc.get(zone).push(item);
@@ -458,7 +521,7 @@ function IndexedMarkers({ items }) {
             </Popup>
           ) : (
             <Popup maxWidth={280} className="incident-popup">
-              {itemPopupContent(m.item)}
+              {itemPopupContent(m.item, m.isGps)}
             </Popup>
           )}
         </Marker>
@@ -501,9 +564,14 @@ function Legend({ counts }) {
           <span style={{ fontSize: 11.5, color: "#0b1c30" }}>Resolved</span>
           <span style={{ marginLeft: "auto", fontSize: 11, color: "#475569", fontFamily: "JetBrains Mono, monospace" }}>{counts.other}</span>
         </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          <span style={{ width: 12, height: 12, borderRadius: "50%", background: "#fff", border: "3px solid #06b6d4", boxShadow: "0 0 0 1px rgba(6,182,212,0.5)" }} />
+          <span style={{ fontSize: 11.5, color: "#0b1c30" }}>Exact GPS</span>
+          <span style={{ marginLeft: "auto", fontSize: 11, color: "#475569", fontFamily: "JetBrains Mono, monospace" }}>{counts.gps}</span>
+        </div>
       </div>
       <div style={{ marginTop: 7, paddingTop: 6, borderTop: "1px solid rgba(0,0,0,0.08)", fontSize: 10, color: "#64748b", lineHeight: 1.35 }}>
-        Markers sit at zone anchors, not exact item locations.
+        Ringed markers use exact captured GPS. Others sit at zone anchors.
       </div>
     </div>
   );
@@ -521,6 +589,7 @@ export default function CampusIncidentMap({ height = "100%", activeZone = "All C
     lost: items.filter((i) => i.status === "Lost").length,
     found: items.filter((i) => i.status === "Found").length,
     other: items.filter((i) => i.status === "Resolved").length,
+    gps: items.filter((i) => hasValidCoords(i.latitude, i.longitude)).length,
   };
 
   const ready = dbLoaded && items.length > 0;

@@ -9,7 +9,7 @@ export default function ReportFormPage({ mode = "Lost" }) {
   const { user } = useAuth();
   const navigate = useNavigate();
 
-  const handleSubmit = async ({ name, location, description, status, category, imageFile }) => {
+  const handleSubmit = async ({ name, location, description, status, category, imageFile, latitude, longitude, zone }) => {
     const row = await createReport({
       userId: user.id,
       name,
@@ -18,6 +18,11 @@ export default function ReportFormPage({ mode = "Lost" }) {
       status,
       category,
       imageFile: imageFile || null,
+      // Optional GPS position (null when the reporter skipped it / denied it).
+      latitude: latitude ?? null,
+      longitude: longitude ?? null,
+      // Manual fallback zone for map placement when GPS is absent.
+      zone: zone || null,
     });
 
     // Immediately update local state so Browse/Reports reflect the new item

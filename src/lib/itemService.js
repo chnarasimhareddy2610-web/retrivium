@@ -1,4 +1,5 @@
 import { supabase } from "./supabaseClient";
+import { hasValidCoords } from "./geo";
 
 const BUCKET = "item-images";
 const SIGNED_URL_EXPIRY = 60 * 60; // 1 hour in seconds
@@ -106,7 +107,7 @@ export async function fetchMyItems(userId) {
  *
  * Returns the final inserted DB row.
  */
-export async function createReport({ userId, name, location, status, category, description, imageFile }) {
+export async function createReport({ userId, name, location, status, category, description, imageFile, latitude, longitude, zone }) {
   // Generate a UUID for this item
   const itemId = crypto.randomUUID();
   const referenceTag = `REP-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -121,6 +122,12 @@ export async function createReport({ userId, name, location, status, category, d
   // Map UI status ('Lost' | 'Found') to lowercase DB enum ('lost' | 'found')
   const dbStatus = (status || "Lost").toLowerCase();
 
+  // Optional GPS position. Only persisted when BOTH coordinates are valid —
+  // otherwise NULL is stored. We never fabricate a position.
+  const hasCoords = hasValidCoords(latitude, longitude);
+  const lat = hasCoords ? Number(latitude) : null;
+  const lng = hasCoords ? Number(longitude) : null;
+
   // Step 2: Insert DB row
   const itemData = {
     id: itemId,
@@ -130,6 +137,9 @@ export async function createReport({ userId, name, location, status, category, d
     category: category || "Other",
     status: dbStatus,
     location: location.trim(),
+    zone: zone || null,
+    latitude: lat,
+    longitude: lng,
     image_path: imagePath,
     reference_tag: referenceTag,
     custody_info: dbStatus === "found" ? "Held at Security Desk" : null,
@@ -157,10 +167,19 @@ export function normalizeDbItem(row) {
     ? row.status.charAt(0).toUpperCase() + row.status.slice(1).toLowerCase()
     : "Lost";
 
+  // Optional GPS coordinates — keep as numbers when present and valid,
+  // otherwise null (older rows have no coordinates at all).
+  const coords = hasValidCoords(row.latitude, row.longitude)
+    ? { latitude: Number(row.latitude), longitude: Number(row.longitude) }
+    : { latitude: null, longitude: null };
+
   return {
     id: row.id,
     name: row.name,
     location: row.location,
+    zone: row.zone || null,
+    latitude: coords.latitude,
+    longitude: coords.longitude,
     status: uiStatus,
     category: row.category || "Other",
     date: row.created_at
