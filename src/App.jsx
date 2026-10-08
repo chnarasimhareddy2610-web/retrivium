@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import { AppDataProvider } from "./context/AppDataContext";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
+import RoleProtectedRoute from "./components/auth/RoleProtectedRoute";
 import AppShell from "./components/layout/AppShell";
 import LandingPage from "./pages/LandingPage";
 import DashboardPage from "./pages/DashboardPage";
@@ -10,6 +11,7 @@ import ReportsPage from "./pages/ReportsPage";
 import ClaimsPage from "./pages/ClaimsPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import ProfilePage from "./pages/ProfilePage";
+import SecurityDeskPage from "./pages/SecurityDeskPage";
 import LoginPage from "./pages/auth/LoginPage";
 import ReportFormPage from "./pages/ReportFormPage";
 
@@ -35,6 +37,11 @@ function App() {
               <Route path="/claims" element={<ClaimsPage />} />
               <Route path="/notifications" element={<NotificationsPage />} />
               <Route path="/profile" element={<ProfilePage />} />
+
+              {/* Security Desk Route (Security/Admin only) */}
+              <Route element={<RoleProtectedRoute allowedRoles={["security", "admin"]} />}>
+                <Route path="/security" element={<SecurityDeskPage />} />
+              </Route>
             </Route>
           </Route>
 

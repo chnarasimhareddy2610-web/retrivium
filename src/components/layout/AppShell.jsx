@@ -54,6 +54,9 @@ export default function AppShell() {
   const displayRole = profile?.role || "Student / Staff";
   const avatarUrl = profile?.avatar_url || null;
 
+  const roleKind = String(profile?.role || user?.role || user?.user_metadata?.role || "").toLowerCase().trim();
+  const isSecurity = roleKind === "security" || roleKind === "security desk" || roleKind === "admin";
+
   const userInitials = (() => {
     const parts = displayName.trim().split(" ");
     if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
@@ -97,6 +100,9 @@ export default function AppShell() {
           {NAV_ITEMS.map((item) => (
             <SidebarLink key={item.to} {...item} />
           ))}
+          {isSecurity && (
+            <SidebarLink to="/security" label="Security Desk" icon="security" />
+          )}
         </nav>
 
         {/* Report Action */}
@@ -178,6 +184,7 @@ export default function AppShell() {
         <nav className="md:hidden fixed bottom-0 inset-x-0 z-50 bg-surface-container-lowest/95 backdrop-blur-md border-t border-outline-variant/20 flex items-center justify-around px-1 py-1 pb-safe">
           <MobileNavLink to="/dashboard" label="Home" icon="dashboard" />
           <MobileNavLink to="/browse" label="Browse" icon="explore" />
+          {isSecurity && <MobileNavLink to="/security" label="Security" icon="security" />}
           <button
             onClick={() => setReportMenuOpen(!reportMenuOpen)}
             className="flex flex-col items-center gap-0.5 px-2 py-1 min-w-[56px]"
