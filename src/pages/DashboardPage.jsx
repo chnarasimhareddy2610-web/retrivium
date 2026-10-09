@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useAppData } from "../context/AppDataContext";
 import { useAuth } from "../context/AuthContext";
+import { isSecurityOrAdminRole } from "../lib/roleUtils";
 import ItemImage from "../components/common/ItemImage";
 import { fetchMyClaims, normalizeDbClaim } from "../lib/claimService";
 
@@ -139,10 +140,9 @@ function ClaimsCard({ userId, isSecurity }) {
 export default function DashboardPage() {
   const { currentUser, items, dbLoaded, totalCount, foundCount, lostCount, myReportsCount } =
     useAppData();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const userId = user?.id || currentUser.id;
-  const isSecurity =
-    currentUser.role === "Security Desk" || currentUser.role === "security" || currentUser.role === "admin";
+  const isSecurity = isSecurityOrAdminRole(profile?.role || user?.role || currentUser.role);
 
   // Real recent reports: items arrive newest-first from fetchAllItems().
   // Show up to 5 so the panel stays useful on desktop.

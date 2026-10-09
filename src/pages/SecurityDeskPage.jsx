@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useAppData } from "../context/AppDataContext";
@@ -11,19 +11,13 @@ import {
 import { completeHandover } from "../lib/handoverService";
 import ItemImage from "../components/common/ItemImage";
 
+import { isSecurityOrAdminRole } from "../lib/roleUtils";
+
 const RECOVERY_STAGE_LABELS = {
   at_security: "Held by Security",
   claim_approved: "Ready for Handover",
   handed_over: "Handed Over",
 };
-
-function normalizeRole(role) {
-  if (!role) return null;
-  const r = String(role).toLowerCase().trim();
-  if (r === "security" || r === "security desk") return "security";
-  if (r === "admin") return "admin";
-  return null;
-}
 
 function Card({ icon, title, value, color, onClick }) {
   const colorStyles = {
@@ -182,8 +176,8 @@ export default function SecurityDeskPage() {
   const { refreshItems } = useAppData();
   const navigate = useNavigate();
 
-  const role = profile?.role;
-  const roleKind = normalizeRole(role);
+  const userRole = profile?.role || user?.role || user?.user_metadata?.role;
+  const isAuthorized = authLoading ? false : isSecurityOrAdminRole(userRole);
 
   const [items, setItems] = useState([]);
   const [claims, setClaims] = useState([]);
@@ -197,33 +191,40 @@ export default function SecurityDeskPage() {
   const [actionError, setActionError] = useState("");
   const [actionSuccess, setActionSuccess] = useState("");
 
-  const isAuthorized = authLoading ? false : roleKind === "security" || roleKind === "admin";
-
-  useEffect(() => {
-    if (authLoading || !user?.id) return;
-    loadData();
-  }, [authLoading, user?.id, refreshItems]);
-
-  function loadData() {
-    if (!user?.id) return;
-    setLoading(true);
-    setError("");
+  const loadData = useCallback(() => {
+    if (!user?.id) return () => {};
+    let active = true;
     Promise.all([
       fetchAllClaimsForSecurity(),
       supabase.from("items").select("*").order("created_at", { ascending: false }),
     ])
       .then(([claimRows, { data: itemRows, error: itemErr }]) => {
+        if (!active) return;
         if (itemErr) throw itemErr;
         const mapped = (itemRows || []).map((item) => ({ ...normalizeDbItem(item), _fromDb: true }));
         setItems(mapped);
         setClaims(claimRows.map(normalizeDbClaim));
+        setError("");
       })
       .catch((err) => {
+        if (!active) return;
         console.warn("SecurityDesk load error:", err.message);
         setError("Unable to load recovery console data. Please refresh.");
       })
-      .finally(() => setLoading(false));
-  }
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (authLoading || !user?.id) return;
+    const cleanup = loadData();
+    return cleanup;
+  }, [authLoading, user?.id, loadData]);
 
   function clearHighlights() {
     setSelectedItemId("");
@@ -232,20 +233,25 @@ export default function SecurityDeskPage() {
     setActionSuccess("");
   }
 
-  function claimForItem(itemId) {
-    return claims.find(
-      (c) =>
-        c.itemId === itemId &&
-        (c.rawStatus === "under_review" ||
-          c.rawStatus === "approved" ||
-          c.rawStatus === "pending")
-    ) || null;
+  function findApprovedClaimForItem(itemId) {
+    if (!itemId || !Array.isArray(claims)) return null;
+    return claims.find((c) => c.itemId === itemId && c.rawStatus === "approved") || null;
+  }
+
+  function findActiveClaimForItem(itemId) {
+    if (!itemId || !Array.isArray(claims)) return null;
+    return (
+      claims.find((c) => c.itemId === itemId && c.rawStatus === "approved") ||
+      claims.find((c) => c.itemId === itemId && c.rawStatus === "under_review") ||
+      claims.find((c) => c.itemId === itemId && c.rawStatus === "pending") ||
+      claims.find((c) => c.itemId === itemId) ||
+      null
+    );
   }
 
   function claimableForHandover(item) {
-    if (item.recoveryState !== "claim_approved") return null;
-    const c = claimForItem(item.id);
-    return c && c.rawStatus === "approved" ? c : null;
+    if (!item || item.recoveryState !== "claim_approved") return null;
+    return findApprovedClaimForItem(item.id);
   }
 
   const honeCardCount = items.filter((item) => item.recoveryState === "claim_approved").length;
@@ -426,7 +432,7 @@ export default function SecurityDeskPage() {
                     <ItemCard
                       key={item.id}
                       item={item}
-                      claim={claimForItem(item.id)}
+                      claim={findActiveClaimForItem(item.id)}
                       handoverClaim={claimableForHandover(item)}
                       isSelected={selectedItemId === item.id}
                       onSelect={() => {
@@ -453,17 +459,22 @@ export default function SecurityDeskPage() {
           {selectedItem ? (
             <DetailPanel
               item={selectedItem}
-              claim={claimForItem(selectedItem.id)}
+              claim={findActiveClaimForItem(selectedItem.id)}
               handoverClaim={claimableForHandover(selectedItem)}
               onClose={() => clearHighlights()}
               submitHandoverAction={async () => {
-                const targetClaim = claimableForHandover(selectedItem) || claimForItem(selectedItem.id);
-                const receiverId = targetClaim?.claimantId || selectedItem.reportedBy;
+                const approvedClaim = findApprovedClaimForItem(selectedItem.id);
+                if (!approvedClaim) {
+                  throw new Error("Handover requires an approved claim for this item.");
+                }
+                if (!approvedClaim.claimantId) {
+                  throw new Error("Approved claim is missing claimant information.");
+                }
                 try {
                   await completeHandover({
                     itemId: selectedItem.id,
-                    claimId: targetClaim?.id || null,
-                    receiverId: receiverId,
+                    claimId: approvedClaim.id,
+                    receiverId: approvedClaim.claimantId,
                   });
                   setActionSuccess("Handover complete. Item resolved and handed over.");
                   refreshItems();
@@ -627,15 +638,27 @@ function DetailPanel({ item, claim, handoverClaim, onClose, submitHandoverAction
             <p className="text-headline-sm text-on-surface">Complete Handover</p>
           </div>
 
-          <p className="text-[11px] text-on-surface-variant uppercase tracking-wide">Receiver</p>
+          <p className="text-[11px] text-on-surface-variant uppercase tracking-wide">Receiver (Approved Claimant)</p>
           <div className="bg-surface-container rounded-lg p-3 text-body-sm text-on-surface">
-            {item.reportedBy || claim.claimantName || "—"}
-            {claim.claimantEmail && " — " + claim.claimantEmail}
+            <span className="font-medium">{handoverClaim.claimantName || claim?.claimantName || "Approved Claimant"}</span>
+            {(handoverClaim.claimantEmail || claim?.claimantEmail) && (
+              <span className="text-on-surface-variant block text-xs mt-0.5 font-normal">
+                {handoverClaim.claimantEmail || claim?.claimantEmail}
+              </span>
+            )}
           </div>
 
-          <button className="px-4 py-2 border border-outline-variant text-on-surface rounded-lg font-medium hover:bg-surface-container transition-colors disabled:opacity-50" disabled={loading} onClick={handleCompleteHandover}>
-            <span className="material-symbols-outlined text-[16px] mr-1.5">arrow_forward</span>
-            Hand over to above receiver
+          <button
+            className="w-full px-4 py-2 bg-secondary text-on-secondary rounded-lg font-medium hover:bg-secondary-container transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            disabled={loading}
+            onClick={handleCompleteHandover}
+          >
+            {loading ? (
+              <div className="w-4 h-4 border-2 border-on-secondary border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <span className="material-symbols-outlined text-[18px]">swap_horiz</span>
+            )}
+            Hand over to approved claimant
           </button>
         </div>
       )}

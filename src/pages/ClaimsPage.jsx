@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useAppData } from "../context/AppDataContext";
+import { isSecurityOrAdminRole } from "../lib/roleUtils";
 import {
   fetchMyClaims,
   fetchAllClaimsForSecurity,
@@ -27,7 +28,7 @@ async function loadClaimsData(user, { setDbClaims, setError, setLoading, isActiv
   setLoading(true);
   setError("");
   try {
-    const isSecurityOrAdmin = user.role === "security" || user.role === "admin";
+    const isSecurityOrAdmin = isSecurityOrAdminRole(user.role);
     const rows = isSecurityOrAdmin
       ? await fetchAllClaimsForSecurity()
       : await fetchMyClaims(user.id);
@@ -44,8 +45,8 @@ export default function ClaimsPage() {
   const { user, profile } = useAuth();
   const { dbItems, refreshItems } = useAppData();
 
-  const userRole = profile?.role || "student";
-  const isSecurity = userRole === "security" || userRole === "admin";
+  const userRole = profile?.role || user?.role || user?.user_metadata?.role;
+  const isSecurity = isSecurityOrAdminRole(userRole);
 
   const [dbClaims, setDbClaims] = useState([]);
   const [loading, setLoading] = useState(true);

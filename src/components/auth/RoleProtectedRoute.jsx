@@ -1,7 +1,6 @@
 import { Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
-
-const DEFAULT_ALLOWED_ROLES = ["security", "admin"];
+import { hasAllowedRole } from "../../lib/roleUtils";
 
 export default function RoleProtectedRoute({
   allowedRoles,
@@ -9,8 +8,6 @@ export default function RoleProtectedRoute({
   children,
 }) {
   const { user, profile, loading } = useAuth();
-  const roles = Array.isArray(allowedRoles) ? allowedRoles : DEFAULT_ALLOWED_ROLES;
-  const allowed = new Set(roles.map((r) => String(r ?? "").toLowerCase().trim()));
 
   if (loading) {
     return (
@@ -20,10 +17,9 @@ export default function RoleProtectedRoute({
     );
   }
 
-  const role = profile?.role || user?.role || user?.user_metadata?.role;
-  const normalized = role ? String(role).toLowerCase().trim() : null;
+  const userRole = profile?.role || user?.role || user?.user_metadata?.role;
 
-  if (!normalized || !allowed.has(normalized)) {
+  if (!hasAllowedRole(userRole, allowedRoles)) {
     return Fallback;
   }
 

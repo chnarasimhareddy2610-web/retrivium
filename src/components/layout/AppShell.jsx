@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { useAuth } from "../../context/AuthContext";
+import { isSecurityOrAdminRole } from "../../lib/roleUtils";
 
 const NAV_ITEMS = [
   { to: "/dashboard", label: "Dashboard", icon: "dashboard" },
@@ -54,8 +55,8 @@ export default function AppShell() {
   const displayRole = profile?.role || "Student / Staff";
   const avatarUrl = profile?.avatar_url || null;
 
-  const roleKind = String(profile?.role || user?.role || user?.user_metadata?.role || "").toLowerCase().trim();
-  const isSecurity = roleKind === "security" || roleKind === "security desk" || roleKind === "admin";
+  const userRole = profile?.role || user?.role || user?.user_metadata?.role;
+  const isSecurity = isSecurityOrAdminRole(userRole);
 
   const userInitials = (() => {
     const parts = displayName.trim().split(" ");
