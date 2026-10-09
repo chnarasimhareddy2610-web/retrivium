@@ -5,6 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import { isSecurityOrAdminRole } from "../lib/roleUtils";
 import ItemImage from "../components/common/ItemImage";
 import { fetchMyClaims, normalizeDbClaim } from "../lib/claimService";
+import SmartMatchPanel from "../components/match/SmartMatchPanel";
 
 function StatusPill({ status }) {
   const variant =
@@ -228,6 +229,9 @@ export default function DashboardPage() {
             </div>
           </Link>
         </div>
+
+        {/* Smart Matches Panel */}
+        <SmartMatchPanel limit={3} />
 
         {/* Real statistics — derived from live app state only */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

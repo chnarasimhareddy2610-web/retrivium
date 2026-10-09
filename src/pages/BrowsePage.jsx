@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import FilterBar from "../components/search/FilterBar";
 import CampusIncidentMap from "../components/map/CampusIncidentMap";
 import FeedList from "../components/feed/FeedList";
+import SmartMatchPanel from "../components/match/SmartMatchPanel";
 import { useAppData } from "../context/AppDataContext";
 
 export default function BrowsePage() {
@@ -67,7 +68,8 @@ export default function BrowsePage() {
           onFocusItem={handleFocusItem}
         />
       ) : (
-        <div className="w-full max-w-3xl mx-auto py-6">
+        <div className="w-full max-w-3xl mx-auto py-6 px-4 space-y-6">
+          <SmartMatchPanel limit={3} />
           <FeedList
             items={filteredItems}
             onFocusItem={handleFocusItem}
