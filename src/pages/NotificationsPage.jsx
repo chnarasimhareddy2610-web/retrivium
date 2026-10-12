@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import {
@@ -7,6 +7,18 @@ import {
   markAllNotificationsRead,
   normalizeDbNotification,
 } from "../lib/notificationService";
+import { useRealtimeRefresh } from "../hooks/useRealtimeRefresh";
+
+// Stable descriptors — declared outside the component so array identity does
+// not change between renders and avoids spurious re-subscriptions.
+// We subscribe to `claims` because every significant claim event (approve /
+// reject / new) triggers a DB-side notification insert via trigger.
+// We also attempt the `notifications` table directly; it will silently fail if
+// Realtime is not enabled for that table, which is acceptable.
+const NOTIFICATIONS_REALTIME_TABLES = [
+  { table: "claims" },
+  { table: "notifications" },
+];
 
 async function loadNotificationsData(userId, setDbNotes, setError, setLoading) {
   if (!userId) {
@@ -38,6 +50,20 @@ export default function NotificationsPage() {
   useEffect(() => {
     loadNotificationsData(userId, setDbNotes, setError, setLoading);
   }, [userId]);
+
+  // Realtime: silently refresh notifications when a claim changes or a new
+  // notification row is inserted. Both channels use a 500ms debounce so
+  // rapid events don’t trigger multiple sequential fetches.
+  const refreshNotificationsLive = useCallback(() => {
+    loadNotificationsData(userId, setDbNotes, setError, setLoading);
+  }, [userId]);
+
+  useRealtimeRefresh({
+    userId,
+    channelKey: "notifications-page-sync",
+    tables: NOTIFICATIONS_REALTIME_TABLES,
+    onRefresh: refreshNotificationsLive,
+  });
 
   const handleMarkAllRead = async () => {
     if (!userId || actionLoading) return;

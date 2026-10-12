@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useAppData } from "../context/AppDataContext";
 import { isSecurityOrAdminRole } from "../lib/roleUtils";
@@ -11,6 +11,11 @@ import {
   normalizeDbClaim,
 } from "../lib/claimService";
 import ItemImage from "../components/common/ItemImage";
+import { useRealtimeRefresh } from "../hooks/useRealtimeRefresh";
+
+// Stable table descriptor — outside the component so array identity is
+// preserved across renders and does not re-trigger the subscription effect.
+const CLAIMS_REALTIME_TABLES = [{ table: "claims" }];
 
 /**
  * Fetch claims for the current user's role.
@@ -94,6 +99,25 @@ export default function ClaimsPage() {
       active = false;
     };
   }, [user?.id, userRole]);
+
+  // Realtime: refresh claims whenever any row in the claims table changes.
+  // This covers: new claims, status approvals, rejections.
+  // The callback is stable (useCallback) to avoid unnecessary re-subscribes.
+  const refreshClaimsLive = useCallback(() => {
+    let active = true;
+    loadClaimsData(
+      { id: user?.id, role: userRole },
+      { setDbClaims, setError, setLoading, isActive: () => active }
+    );
+    return () => { active = false; };
+  }, [user?.id, userRole]);
+
+  useRealtimeRefresh({
+    userId: user?.id,
+    channelKey: "claims-page-sync",
+    tables: CLAIMS_REALTIME_TABLES,
+    onRefresh: refreshClaimsLive,
+  });
 
   const handleOpenModal = () => {
     setModalOpen(true);

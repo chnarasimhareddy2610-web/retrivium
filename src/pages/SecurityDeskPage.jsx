@@ -12,6 +12,14 @@ import { completeHandover } from "../lib/handoverService";
 import ItemImage from "../components/common/ItemImage";
 
 import { isSecurityOrAdminRole } from "../lib/roleUtils";
+import { useRealtimeRefresh } from "../hooks/useRealtimeRefresh";
+
+// Tables that Security Desk cares about — outside the component for stable
+// array identity so the subscription doesn’t re-create on every render.
+const SECURITY_REALTIME_TABLES = [
+  { table: "claims" },
+  { table: "items" },
+];
 
 const RECOVERY_STAGE_LABELS = {
   at_security: "Held by Security",
@@ -225,6 +233,17 @@ export default function SecurityDeskPage() {
     const cleanup = loadData();
     return cleanup;
   }, [authLoading, user?.id, loadData]);
+
+  // Realtime: re-invoke loadData when any claim or item changes.
+  // Security staff see live updates when students submit claims or when items
+  // switch recovery stages (claim_approved, handed_over).
+  // loadData is already stable (useCallback), so passing it as onRefresh is safe.
+  useRealtimeRefresh({
+    userId: isAuthorized ? user?.id : null,
+    channelKey: "security-desk-sync",
+    tables: SECURITY_REALTIME_TABLES,
+    onRefresh: loadData,
+  });
 
   function clearHighlights() {
     setSelectedItemId("");
