@@ -17,7 +17,7 @@ import { hasValidCoords } from "./geo";
  */
 
 // Calculate 2-gram (bigram) dice coefficient for string similarity
-function bigramSimilarity(str1, str2) {
+export function bigramSimilarity(str1, str2) {
   if (!str1 || !str2) return 0;
   const s1 = str1.toLowerCase().trim().replace(/[^a-z0-9]/g, "");
   const s2 = str2.toLowerCase().trim().replace(/[^a-z0-9]/g, "");
@@ -50,7 +50,7 @@ function bigramSimilarity(str1, str2) {
 }
 
 // Calculate distance in kilometers using Haversine formula
-function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
+export function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
   const R = 6371; // Earth's radius in km
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLon = ((lon2 - lon1) * Math.PI) / 180;

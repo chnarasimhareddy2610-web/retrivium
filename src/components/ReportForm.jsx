@@ -1,7 +1,11 @@
 import { useState, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { getProfanityError } from "../data/profanity";
 import { hasValidCoords } from "../lib/geo";
 import { ZONES } from "../data/dummyData";
+import { useAppData } from "../context/AppDataContext";
+import { findDuplicateReports } from "../lib/duplicateDetectionService";
+import ItemImage from "./common/ItemImage";
 
 // Campus zones a reporter can pick manually as a fallback when they
 // decline/omit GPS. Mirrors the DB campus_zone enum (minus the UI-only
@@ -44,6 +48,9 @@ const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB limit
 const ALLOWED_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"];
 
 function ReportForm({ onSubmit, addItem, defaultStatus = "Lost" }) {
+  const { items } = useAppData();
+  const navigate = useNavigate();
+
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [location, setLocation] = useState("");
@@ -70,6 +77,11 @@ function ReportForm({ onSubmit, addItem, defaultStatus = "Lost" }) {
   const [nameError, setNameError] = useState("");
   const [locationError, setLocationError] = useState("");
   const [imageError, setImageError] = useState("");
+
+  // Duplicate report detection warning modal state
+  const [duplicateWarningOpen, setDuplicateWarningOpen] = useState(false);
+  const [duplicateCandidates, setDuplicateCandidates] = useState([]);
+  const [pendingSubmissionPayload, setPendingSubmissionPayload] = useState(null);
 
   // Keep a ref to the actual File object for upload
   const imageFileRef = useRef(null);
@@ -227,6 +239,26 @@ function ReportForm({ onSubmit, addItem, defaultStatus = "Lost" }) {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
+  const proceedWithSubmission = async (payload) => {
+    setSubmitting(true);
+    setSubmitError("");
+    setDuplicateWarningOpen(false);
+    setPendingSubmissionPayload(null);
+
+    try {
+      // Prefer real async onSubmit (Supabase), fall back to legacy addItem
+      const handler = onSubmit || addItem;
+      await handler(payload);
+      resetForm();
+      setSubmitted(true);
+      setTimeout(() => setSubmitted(false), 2500);
+    } catch (err) {
+      setSubmitError(err.message || "Failed to submit report. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (submitting) return;
@@ -237,33 +269,28 @@ function ReportForm({ onSubmit, addItem, defaultStatus = "Lost" }) {
     setLocationError(lErr);
     if (nErr || lErr || imageError) return;
 
-    setSubmitting(true);
-    setSubmitError("");
+    const payload = {
+      name: name.trim(),
+      location: location.trim(),
+      description: description.trim(),
+      status,
+      category,
+      imageFile: imageFileRef.current || null,
+      latitude: coords ? coords.latitude : null,
+      longitude: coords ? coords.longitude : null,
+      zone: zone || null,
+    };
 
-    try {
-      // Prefer real async onSubmit (Supabase), fall back to legacy addItem
-      const handler = onSubmit || addItem;
-      await handler({
-        name: name.trim(),
-        location: location.trim(),
-        description: description.trim(),
-        status,
-        category,
-        imageFile: imageFileRef.current || null,
-        // Coordinates are persisted only when captured; submitting while the
-        // GPS request is still pending simply saves with null coordinates.
-        latitude: coords ? coords.latitude : null,
-        longitude: coords ? coords.longitude : null,
-        zone: zone || null,
-      });
-      resetForm();
-      setSubmitted(true);
-      setTimeout(() => setSubmitted(false), 2500);
-    } catch (err) {
-      setSubmitError(err.message || "Failed to submit report. Please try again.");
-    } finally {
-      setSubmitting(false);
+    // Check for duplicate reports among active items
+    const duplicates = findDuplicateReports(payload, items);
+    if (duplicates.length > 0) {
+      setDuplicateCandidates(duplicates);
+      setPendingSubmissionPayload(payload);
+      setDuplicateWarningOpen(true);
+      return;
     }
+
+    await proceedWithSubmission(payload);
   };
 
   const inputStyle = (hasError) => ({
@@ -596,6 +623,130 @@ function ReportForm({ onSubmit, addItem, defaultStatus = "Lost" }) {
       }}>
         Reports are saved to the campus database. Offensive or inappropriate language is not permitted.
       </p>
+
+      {/* Duplicate Report Detection Warning Modal */}
+      {duplicateWarningOpen && duplicateCandidates.length > 0 && (
+        <div className="fixed inset-0 bg-inverse-surface/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-6 max-w-lg w-full shadow-2xl flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
+            
+            {/* Modal Header */}
+            <div className="flex items-start gap-3 border-b border-outline-variant/20 pb-3">
+              <div className="w-10 h-10 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center flex-shrink-0 text-amber-500">
+                <span className="material-symbols-outlined text-[24px]">warning</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-headline-sm font-semibold text-on-surface">Possible Duplicate Report</h3>
+                <p className="text-body-sm text-on-surface-variant mt-0.5">
+                  We found an existing active report that looks very similar to yours. Please review it before submitting to help avoid duplicate records.
+                </p>
+              </div>
+            </div>
+
+            {/* Top Match Preview Card */}
+            {(() => {
+              const topMatch = duplicateCandidates[0];
+              const item = topMatch.existingItem;
+              return (
+                <div className="p-4 bg-surface-container-low rounded-xl border border-outline-variant/20 flex flex-col gap-3">
+                  <div className="flex justify-between items-start gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-500/20 text-amber-500">
+                        {topMatch.score}% Similarity ({topMatch.confidence} Match)
+                      </span>
+                      <span className="text-[11px] font-mono text-outline">
+                        {item.tag || item.id}
+                      </span>
+                    </div>
+                    <span className="text-label-sm text-on-surface-variant">
+                      {item.date || "Active"}
+                    </span>
+                  </div>
+
+                  <div className="flex gap-3 items-start">
+                    {item.image_path && (
+                      <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 bg-surface">
+                        <ItemImage imagePath={item.image_path} alt={item.name} />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-headline-sm text-on-surface truncate">{item.name}</h4>
+                      <p className="text-body-sm text-on-surface-variant mt-0.5">
+                        <span className="font-medium text-on-surface">{item.status}</span> • {item.category} • {item.zone ? `${item.zone} (${item.location})` : item.location}
+                      </p>
+                      {item.description && (
+                        <p className="text-body-sm text-on-surface-variant/80 mt-1 line-clamp-2 italic">
+                          &ldquo;{item.description}&rdquo;
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Why it was flagged */}
+                  {topMatch.reasons && topMatch.reasons.length > 0 && (
+                    <div className="pt-2 border-t border-outline-variant/10">
+                      <p className="text-[11px] font-semibold text-outline uppercase tracking-wider mb-1.5">
+                        Why this was flagged:
+                      </p>
+                      <ul className="text-body-sm text-on-surface-variant space-y-1">
+                        {topMatch.reasons.map((r, i) => (
+                          <li key={i} className="flex items-center gap-1.5 text-[12.5px]">
+                            <span className="material-symbols-outlined text-[14px] text-amber-500">check_circle</span>
+                            <span>{r}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Guidance Alert */}
+            <div className="p-3 bg-surface-container rounded-lg text-body-sm text-on-surface-variant">
+              If this is indeed your item or already reported, you can view the active report. If your report is distinct, you can proceed and submit anyway.
+            </div>
+
+            {/* Actions */}
+            <div className="flex flex-col sm:flex-row justify-end gap-3 mt-2 border-t border-outline-variant/20 pt-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setDuplicateWarningOpen(false);
+                  const topItem = duplicateCandidates[0]?.existingItem;
+                  if (topItem) {
+                    navigate(`/browse?search=${encodeURIComponent(topItem.name)}`);
+                  } else {
+                    navigate("/browse");
+                  }
+                }}
+                className="px-4 py-2 border border-outline-variant text-on-surface rounded-lg font-medium hover:bg-surface-container transition-colors flex items-center justify-center gap-2"
+              >
+                <span className="material-symbols-outlined text-[18px]">search</span>
+                View Existing Report
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (pendingSubmissionPayload) {
+                    proceedWithSubmission(pendingSubmissionPayload);
+                  }
+                }}
+                disabled={submitting}
+                className="px-4 py-2 bg-primary text-on-primary rounded-lg font-medium hover:bg-primary-container transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {submitting ? (
+                  <div className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin"></div>
+                ) : (
+                  <span className="material-symbols-outlined text-[18px]">send</span>
+                )}
+                Submit Anyway
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
     </div>
   );
 }
