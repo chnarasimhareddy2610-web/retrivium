@@ -27,13 +27,22 @@ export async function fetchMyClaims(userId) {
 
 /**
  * Submit a claim on a FOUND item.
- * `itemId`: UUID of item being claimed
- * `userId`: UUID of claiming user
- * `notes`: verification/proof details provided by user
+ * Accepts structured ownership evidence fields:
+ *   - notes: primary proof/description (required)
+ *   - distinguishingFeatures: unique marks, scratches, stickers, identifiers
+ *   - knownContents: bag contents, wallet cards, what's inside the case, etc.
+ *   - contextDetails: when/where/how the claimant last had the item
+ *
+ * All evidence is stored in the `notes` column as a structured JSON blob so
+ * no schema migration is required.
  */
-export async function createClaim({ itemId, userId, notes }) {
+export async function createClaim({ itemId, userId, notes, distinguishingFeatures, knownContents, contextDetails }) {
   if (!itemId || !userId) {
     throw new Error("Missing required parameters to submit claim.");
+  }
+
+  if (!notes?.trim()) {
+    throw new Error("Proof / verification notes are required.");
   }
 
   // Check if user already claimed this item
@@ -52,13 +61,22 @@ export async function createClaim({ itemId, userId, notes }) {
     throw new Error("You have already submitted a claim for this item.");
   }
 
+  // Serialize structured evidence into the notes column as a JSON blob.
+  // This keeps the schema additive-free while enabling richer evidence collection.
+  const evidenceBlob = JSON.stringify({
+    notes: notes.trim(),
+    distinguishingFeatures: distinguishingFeatures?.trim() || null,
+    knownContents: knownContents?.trim() || null,
+    contextDetails: contextDetails?.trim() || null,
+  });
+
   const { data, error } = await supabase
     .from("claims")
     .insert({
       item_id: itemId,
       claimant_id: userId,
       status: "pending",
-      notes: notes?.trim() || null,
+      notes: evidenceBlob,
     })
     .select(`
       *,
@@ -189,20 +207,46 @@ export async function approveClaim({ claimId, itemId, reviewerId }) {
 
 /**
  * Reject a claim by Security / Admin.
- * Updates claim status to 'rejected' and sets reviewed_by.
+ * Optionally accepts a rejectionReason string which is appended to the
+ * stored notes blob so the claimant can see Security's feedback.
+ * No schema migration required — uses the existing notes column.
  */
-export async function rejectClaim({ claimId, reviewerId }) {
+export async function rejectClaim({ claimId, reviewerId, rejectionReason }) {
   if (!claimId || !reviewerId) {
     throw new Error("Missing parameters to reject claim.");
   }
 
+  // If a rejection reason was provided, read the current notes, deserialize,
+  // add the rejectionFeedback key, then re-serialize before writing back.
+  let updatePayload = {
+    status: "rejected",
+    reviewed_by: reviewerId,
+    reviewed_at: new Date().toISOString(),
+  };
+
+  if (rejectionReason?.trim()) {
+    // Read existing notes so we don't lose evidence the claimant submitted.
+    const { data: existing } = await supabase
+      .from("claims")
+      .select("notes")
+      .eq("id", claimId)
+      .single();
+
+    const rawNotes = existing?.notes || "";
+    let parsed;
+    try {
+      parsed = rawNotes ? JSON.parse(rawNotes) : {};
+    } catch {
+      parsed = { notes: rawNotes };
+    }
+
+    parsed.rejectionFeedback = rejectionReason.trim();
+    updatePayload.notes = JSON.stringify(parsed);
+  }
+
   const { data, error } = await supabase
     .from("claims")
-    .update({
-      status: "rejected",
-      reviewed_by: reviewerId,
-      reviewed_at: new Date().toISOString(),
-    })
+    .update(updatePayload)
     .eq("id", claimId)
     .select(`
       *,
@@ -231,8 +275,31 @@ export async function rejectClaim({ claimId, reviewerId }) {
 
 /**
  * Normalize DB claim row for UI consumption.
+ * The `notes` column may be a JSON blob (structured evidence) or a plain string
+ * (legacy rows). Both cases are handled safely.
  */
 export function normalizeDbClaim(row) {
+  // Parse structured evidence blob if present; fall back to plain string.
+  let evidenceNotes = "No details provided.";
+  let distinguishingFeatures = null;
+  let knownContents = null;
+  let contextDetails = null;
+  let rejectionFeedback = null;
+
+  if (row.notes) {
+    try {
+      const parsed = JSON.parse(row.notes);
+      evidenceNotes = parsed.notes || "No details provided.";
+      distinguishingFeatures = parsed.distinguishingFeatures || null;
+      knownContents = parsed.knownContents || null;
+      contextDetails = parsed.contextDetails || null;
+      rejectionFeedback = parsed.rejectionFeedback || null;
+    } catch {
+      // Legacy plain-text notes — display as-is.
+      evidenceNotes = row.notes;
+    }
+  }
+
   return {
     id: row.id,
     itemId: row.item_id,
@@ -256,7 +323,13 @@ export function normalizeDbClaim(row) {
     claimantPhone: row.claimant?.phone || "",
     claimantDept: row.claimant?.department || "",
     claimantStudentId: row.claimant?.student_id || "",
-    notes: row.notes || "No details provided.",
+    // Structured evidence fields (null for legacy claims).
+    notes: evidenceNotes,
+    distinguishingFeatures,
+    knownContents,
+    contextDetails,
+    // Security feedback on rejection (null unless rejected with feedback).
+    rejectionFeedback,
     reviewedBy: row.reviewed_by || null,
     reviewedAt: row.reviewed_at || null,
     _fromDb: true,

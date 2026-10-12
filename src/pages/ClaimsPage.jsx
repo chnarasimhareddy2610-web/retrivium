@@ -52,10 +52,12 @@ export default function ClaimsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Student claim file modal
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedItemId, setSelectedItemId] = useState("");
   const [claimNotes, setClaimNotes] = useState("");
+  const [distinguishingFeatures, setDistinguishingFeatures] = useState("");
+  const [knownContents, setKnownContents] = useState("");
+  const [contextDetails, setContextDetails] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
@@ -66,6 +68,10 @@ export default function ClaimsPage() {
   const [reviewActionLoading, setReviewActionLoading] = useState(false);
   const [reviewError, setReviewError] = useState("");
   const [reviewSuccessMsg, setReviewSuccessMsg] = useState("");
+
+  // Student view detail modal
+  const [viewClaimModalOpen, setViewClaimModalOpen] = useState(false);
+  const [viewClaim, setViewClaim] = useState(null);
 
   // Filter available found items from DB for students
   const claimableFoundItems = dbItems.filter(
@@ -94,6 +100,9 @@ export default function ClaimsPage() {
     setFormError("");
     setSuccessMsg("");
     setClaimNotes("");
+    setDistinguishingFeatures("");
+    setKnownContents("");
+    setContextDetails("");
     if (claimableFoundItems.length > 0) {
       setSelectedItemId(claimableFoundItems[0].id);
     } else {
@@ -107,8 +116,8 @@ export default function ClaimsPage() {
       setFormError("Please select a found item to claim.");
       return;
     }
-    if (!claimNotes.trim()) {
-      setFormError("Please provide proof/notes of ownership.");
+    if (!claimNotes.trim() || claimNotes.trim().length < 20) {
+      setFormError("Please describe how you can prove ownership (at least 20 characters).");
       return;
     }
 
@@ -120,12 +129,18 @@ export default function ClaimsPage() {
         itemId: selectedItemId,
         userId: user.id,
         notes: claimNotes,
+        distinguishingFeatures,
+        knownContents,
+        contextDetails,
       });
 
       const normalized = normalizeDbClaim(newClaimRow);
       setDbClaims((prev) => [normalized, ...prev]);
       setSuccessMsg("Claim submitted successfully! Security Desk will review your request.");
       setClaimNotes("");
+      setDistinguishingFeatures("");
+      setKnownContents("");
+      setContextDetails("");
       setTimeout(() => {
         setModalOpen(false);
         setSuccessMsg("");
@@ -137,12 +152,17 @@ export default function ClaimsPage() {
     }
   };
 
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [showRejectionInput, setShowRejectionInput] = useState(false);
+
   // Security Review Actions — hard role guard: students can never trigger these.
   const handleOpenReview = (claim) => {
     if (!isSecurity || !claim?._fromDb) return;
     setReviewClaim(claim);
     setReviewError("");
     setReviewSuccessMsg("");
+    setRejectionReason("");
+    setShowRejectionInput(false);
     setReviewModalOpen(true);
   };
 
@@ -176,12 +196,17 @@ export default function ClaimsPage() {
 
   const handleRejectClaim = async () => {
     if (!isSecurity || !reviewClaim || reviewActionLoading) return;
+    if (!showRejectionInput) {
+      setShowRejectionInput(true);
+      return;
+    }
     setReviewActionLoading(true);
     setReviewError("");
     try {
       const updatedRow = await rejectClaim({
         claimId: reviewClaim.id,
         reviewerId: user.id,
+        rejectionReason: rejectionReason.trim(),
       });
       const normalized = normalizeDbClaim(updatedRow);
       setDbClaims((prev) =>
@@ -189,7 +214,7 @@ export default function ClaimsPage() {
       );
       // Re-sync shared item state so Browse/Reports match the DB.
       refreshItems();
-      setReviewSuccessMsg("Claim REJECTED.");
+      setReviewSuccessMsg("Claim REJECTED with feedback provided to claimant.");
       setTimeout(() => {
         setReviewModalOpen(false);
         setReviewClaim(null);
@@ -315,9 +340,20 @@ export default function ClaimsPage() {
                   </p>
                 )}
 
-                <p className="text-body-sm text-on-surface-variant bg-surface-container-low p-3 rounded-lg mb-4 italic line-clamp-2">
-                  "{claim.notes}"
+                <p className="text-body-sm text-on-surface-variant bg-surface-container-low p-3 rounded-lg mb-2 italic line-clamp-2">
+                  &ldquo;{claim.notes}&rdquo;
                 </p>
+
+                {/* Rejection feedback — visible to claimant only */}
+                {!isSecurity && claim.rawStatus === "rejected" && claim.rejectionFeedback && (
+                  <div className="p-2.5 bg-error-container/10 border border-error/20 rounded-lg mb-3 flex items-start gap-2">
+                    <span className="material-symbols-outlined text-error text-[16px] mt-0.5 flex-shrink-0">info</span>
+                    <div>
+                      <p className="text-[11px] font-semibold text-error uppercase mb-0.5">Security Desk Feedback</p>
+                      <p className="text-body-sm text-on-surface">{claim.rejectionFeedback}</p>
+                    </div>
+                  </div>
+                )}
 
                 <div className="flex justify-between items-center border-t border-outline-variant/20 pt-4 mt-auto">
                   <span className="text-label-sm text-on-surface-variant">
@@ -328,7 +364,14 @@ export default function ClaimsPage() {
                       : "Security Desk verification required"}
                   </span>
                   <button
-                    onClick={() => (isSecurity ? handleOpenReview(claim) : undefined)}
+                    onClick={() => {
+                      if (isSecurity) {
+                        handleOpenReview(claim);
+                      } else {
+                        setViewClaim(claim);
+                        setViewClaimModalOpen(true);
+                      }
+                    }}
                     className="text-primary hover:underline font-label-md"
                   >
                     {isSecurity ? "Review Claim" : "View Details"}
@@ -339,6 +382,117 @@ export default function ClaimsPage() {
           </div>
         )}
       </div>
+
+      {/* Claimant View Claim Details Modal */}
+      {viewClaimModalOpen && viewClaim && (
+        <div className="fixed inset-0 bg-inverse-surface/40 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-6 max-w-lg w-full shadow-xl flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center border-b border-outline-variant/20 pb-3">
+              <div>
+                <h2 className="text-headline-sm text-on-surface">Claim Verification Details</h2>
+                <p className="text-label-sm text-outline">Claim ID: {viewClaim.id}</p>
+              </div>
+              <button
+                onClick={() => {
+                  setViewClaimModalOpen(false);
+                  setViewClaim(null);
+                }}
+                className="text-on-surface-variant hover:text-on-surface"
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            {/* Item Info */}
+            <div className="flex gap-4 p-3 bg-surface-container-low rounded-lg items-start">
+              {viewClaim.itemImagePath && (
+                <div className="w-20 h-20 rounded-lg overflow-hidden flex-shrink-0 bg-surface">
+                  <ItemImage imagePath={viewClaim.itemImagePath} alt={viewClaim.itemName} />
+                </div>
+              )}
+              <div>
+                <h4 className="font-headline-sm text-on-surface">{viewClaim.itemName}</h4>
+                <p className="text-body-sm text-on-surface-variant mt-0.5">
+                  Category: {viewClaim.itemCategory} • Location: {viewClaim.itemLocation}
+                </p>
+                <div className="flex items-center gap-2 mt-2">
+                  <span
+                    className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
+                      viewClaim.status === "Approved"
+                        ? "bg-tertiary-container/20 text-tertiary"
+                        : viewClaim.status === "Rejected"
+                        ? "bg-error-container/20 text-error"
+                        : "bg-surface-container-high text-on-surface-variant"
+                    }`}
+                  >
+                    Status: {viewClaim.status}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Rejection Feedback if rejected */}
+            {viewClaim.rawStatus === "rejected" && viewClaim.rejectionFeedback && (
+              <div className="p-3 bg-error-container/10 border border-error/20 rounded-lg">
+                <p className="text-label-md font-semibold text-error uppercase mb-1">Security Desk Feedback</p>
+                <p className="text-body-sm text-on-surface">{viewClaim.rejectionFeedback}</p>
+              </div>
+            )}
+
+            {/* Submitted Ownership Evidence */}
+            <div className="flex flex-col gap-3">
+              <h4 className="text-label-lg font-semibold text-on-surface uppercase">Your Submitted Evidence</h4>
+
+              <div>
+                <p className="text-[11px] text-on-surface-variant uppercase tracking-wide mb-1">Primary Proof of Ownership</p>
+                <div className="p-3 bg-surface-container-low rounded-lg text-body-md text-on-surface italic">
+                  &ldquo;{viewClaim.notes}&rdquo;
+                </div>
+              </div>
+
+              {viewClaim.distinguishingFeatures && (
+                <div>
+                  <p className="text-[11px] text-on-surface-variant uppercase tracking-wide mb-1">Distinguishing Features</p>
+                  <div className="p-3 bg-surface-container-low rounded-lg text-body-sm text-on-surface">
+                    {viewClaim.distinguishingFeatures}
+                  </div>
+                </div>
+              )}
+
+              {viewClaim.knownContents && (
+                <div>
+                  <p className="text-[11px] text-on-surface-variant uppercase tracking-wide mb-1">Known Contents</p>
+                  <div className="p-3 bg-surface-container-low rounded-lg text-body-sm text-on-surface">
+                    {viewClaim.knownContents}
+                  </div>
+                </div>
+              )}
+
+              {viewClaim.contextDetails && (
+                <div>
+                  <p className="text-[11px] text-on-surface-variant uppercase tracking-wide mb-1">When & Where You Last Had It</p>
+                  <div className="p-3 bg-surface-container-low rounded-lg text-body-sm text-on-surface">
+                    {viewClaim.contextDetails}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-3 mt-2 border-t border-outline-variant/20 pt-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setViewClaimModalOpen(false);
+                  setViewClaim(null);
+                }}
+                className="px-4 py-2 bg-primary text-on-primary rounded-lg font-medium hover:bg-primary-container transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Student Claim Submission Modal */}
       {modalOpen && (
@@ -388,17 +542,65 @@ export default function ClaimsPage() {
                 )}
               </div>
 
+              {/* Field 1 — Primary Proof (required) */}
               <div>
-                <label className="block text-label-lg text-on-surface mb-1.5">
-                  Proof / Verification Notes
+                <label className="block text-label-lg text-on-surface mb-1">
+                  Proof of Ownership <span className="text-error">*</span>
                 </label>
+                <p className="text-body-sm text-on-surface-variant mb-1.5">
+                  Provide serial numbers, lock-screen PIN/pattern hint, registered account, or other verifiable details.
+                </p>
                 <textarea
                   rows="3"
                   value={claimNotes}
                   onChange={(e) => setClaimNotes(e.target.value)}
-                  placeholder="Provide serial numbers, distinctive markings, or lock screen details to prove ownership…"
+                  placeholder="e.g. Serial number SN-8471-XX, IMEI 356938035643809, registered to lakshmi@college.edu…"
                   className="w-full p-3 border border-outline-variant rounded-lg bg-surface-container-lowest text-on-surface text-body-md focus:border-primary focus:outline-none"
                   required
+                  minLength={20}
+                />
+                <p className="text-[11px] text-on-surface-variant mt-0.5">{claimNotes.trim().length}/20 min characters</p>
+              </div>
+
+              {/* Field 2 — Distinguishing Features (optional) */}
+              <div>
+                <label className="block text-label-lg text-on-surface mb-1">Distinguishing Features</label>
+                <p className="text-body-sm text-on-surface-variant mb-1.5">
+                  Scratches, stickers, colour, case type, engraving, custom settings, or unique physical marks.
+                </p>
+                <textarea
+                  rows="2"
+                  value={distinguishingFeatures}
+                  onChange={(e) => setDistinguishingFeatures(e.target.value)}
+                  placeholder="e.g. Broken back-left corner, blue case with a cat sticker, screen crack top-right…"
+                  className="w-full p-3 border border-outline-variant rounded-lg bg-surface-container-lowest text-on-surface text-body-md focus:border-primary focus:outline-none"
+                />
+              </div>
+
+              {/* Field 3 — Known Contents (optional) */}
+              <div>
+                <label className="block text-label-lg text-on-surface mb-1">Known Contents</label>
+                <p className="text-body-sm text-on-surface-variant mb-1.5">
+                  For bags, wallets, or containers — list what was inside at the time of loss.
+                </p>
+                <textarea
+                  rows="2"
+                  value={knownContents}
+                  onChange={(e) => setKnownContents(e.target.value)}
+                  placeholder="e.g. Aadhaar card, a red USB drive, library card SREC-0441, ₹200 approximate cash…"
+                  className="w-full p-3 border border-outline-variant rounded-lg bg-surface-container-lowest text-on-surface text-body-md focus:border-primary focus:outline-none"
+                />
+              </div>
+
+              {/* Field 4 — Context (optional) */}
+              <div>
+                <label className="block text-label-lg text-on-surface mb-1">When & Where You Last Had It</label>
+                <textarea
+                  rows="2"
+                  value={contextDetails}
+                  onChange={(e) => setContextDetails(e.target.value)}
+                  placeholder="e.g. Left it charging at CS Block Lab 3, Wednesday around 2 PM, last seen on the third bench from the door…"
+                  className="w-full p-3 border border-outline-variant rounded-lg bg-surface-container-lowest text-on-surface text-body-md focus:border-primary focus:outline-none"
                 />
               </div>
 
@@ -488,15 +690,60 @@ export default function ClaimsPage() {
               )}
             </div>
 
-            {/* Proof Notes */}
-            <div>
-              <h4 className="text-label-lg font-semibold text-on-surface uppercase mb-1">
-                Proof / Verification Notes
-              </h4>
-              <div className="p-3 bg-surface-container-low rounded-lg text-body-md text-on-surface italic">
-                "{reviewClaim.notes}"
+            {/* Structured Evidence */}
+            <div className="flex flex-col gap-3">
+              <h4 className="text-label-lg font-semibold text-on-surface uppercase">Ownership Evidence</h4>
+
+              <div>
+                <p className="text-[11px] text-on-surface-variant uppercase tracking-wide mb-1">Primary Proof</p>
+                <div className="p-3 bg-surface-container-low rounded-lg text-body-md text-on-surface italic">
+                  &ldquo;{reviewClaim.notes}&rdquo;
+                </div>
               </div>
+
+              {reviewClaim.distinguishingFeatures && (
+                <div>
+                  <p className="text-[11px] text-on-surface-variant uppercase tracking-wide mb-1">Distinguishing Features</p>
+                  <div className="p-3 bg-surface-container-low rounded-lg text-body-sm text-on-surface">
+                    {reviewClaim.distinguishingFeatures}
+                  </div>
+                </div>
+              )}
+
+              {reviewClaim.knownContents && (
+                <div>
+                  <p className="text-[11px] text-on-surface-variant uppercase tracking-wide mb-1">Known Contents</p>
+                  <div className="p-3 bg-surface-container-low rounded-lg text-body-sm text-on-surface">
+                    {reviewClaim.knownContents}
+                  </div>
+                </div>
+              )}
+
+              {reviewClaim.contextDetails && (
+                <div>
+                  <p className="text-[11px] text-on-surface-variant uppercase tracking-wide mb-1">Context / Last Seen</p>
+                  <div className="p-3 bg-surface-container-low rounded-lg text-body-sm text-on-surface">
+                    {reviewClaim.contextDetails}
+                  </div>
+                </div>
+              )}
             </div>
+
+            {/* Rejection Reason Input (when active) */}
+            {showRejectionInput && (
+              <div className="p-3 bg-error-container/10 border border-error/20 rounded-lg flex flex-col gap-2">
+                <label className="text-label-md text-error font-medium">
+                  Provide Rejection Reason / Guidance for Claimant (Optional):
+                </label>
+                <textarea
+                  rows="2"
+                  value={rejectionReason}
+                  onChange={(e) => setRejectionReason(e.target.value)}
+                  placeholder="Explain why evidence was insufficient (e.g. incorrect serial number, lock screen code did not match)..."
+                  className="w-full p-2 border border-outline-variant rounded-md text-body-sm bg-surface-container-lowest text-on-surface focus:border-error focus:outline-none"
+                />
+              </div>
+            )}
 
             {/* Action Buttons */}
             <div className="flex justify-end gap-3 mt-4 border-t border-outline-variant/20 pt-4">
@@ -517,21 +764,23 @@ export default function ClaimsPage() {
                     className="px-4 py-2 bg-error text-on-error rounded-lg font-medium hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-1.5"
                   >
                     <span className="material-symbols-outlined text-[18px]">cancel</span>
-                    Reject Claim
+                    {showRejectionInput ? "Confirm Rejection" : "Reject Claim"}
                   </button>
-                  <button
-                    type="button"
-                    onClick={handleApproveClaim}
-                    disabled={reviewActionLoading}
-                    className="px-4 py-2 bg-tertiary text-on-tertiary rounded-lg font-medium hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-1.5"
-                  >
-                    {reviewActionLoading ? (
-                      <div className="w-4 h-4 border-2 border-on-tertiary border-t-transparent rounded-full animate-spin"></div>
-                    ) : (
-                      <span className="material-symbols-outlined text-[18px]">check_circle</span>
-                    )}
-                    Approve & Resolve
-                  </button>
+                  {!showRejectionInput && (
+                    <button
+                      type="button"
+                      onClick={handleApproveClaim}
+                      disabled={reviewActionLoading}
+                      className="px-4 py-2 bg-tertiary text-on-tertiary rounded-lg font-medium hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      {reviewActionLoading ? (
+                        <div className="w-4 h-4 border-2 border-on-tertiary border-t-transparent rounded-full animate-spin"></div>
+                      ) : (
+                        <span className="material-symbols-outlined text-[18px]">check_circle</span>
+                      )}
+                      Approve & Prepare Handover
+                    </button>
+                  )}
                 </>
               ) : (
                 <div className="text-body-sm text-on-surface-variant flex items-center gap-1">

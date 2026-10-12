@@ -590,9 +590,27 @@ function DetailPanel({ item, claim, handoverClaim, onClose, submitHandoverAction
             {claim.reviewedBy && <div className="flex justify-between border-t border-outline-variant/10 pt-2"><span className="text-on-surface-variant">Reviewed</span><span className="text-on-surface">{claim.reviewedAt ? new Date(claim.reviewedAt).toLocaleString() : "—"}</span></div>}
           </div>
 
-          <div>
-            <p className="text-[11px] text-on-surface-variant uppercase tracking-wide mb-1">Verification Notes</p>
+          <div className="flex flex-col gap-2">
+            <p className="text-[11px] text-on-surface-variant uppercase tracking-wide">Ownership Evidence</p>
             <div className="bg-surface-container p-3 rounded-lg text-body-sm italic text-on-surface">&ldquo;{claim.notes || "—"}&rdquo;</div>
+            {claim.distinguishingFeatures && (
+              <div>
+                <p className="text-[11px] text-on-surface-variant uppercase tracking-wide mb-1">Distinguishing Features</p>
+                <div className="bg-surface-container p-2.5 rounded text-body-sm text-on-surface">{claim.distinguishingFeatures}</div>
+              </div>
+            )}
+            {claim.knownContents && (
+              <div>
+                <p className="text-[11px] text-on-surface-variant uppercase tracking-wide mb-1">Known Contents</p>
+                <div className="bg-surface-container p-2.5 rounded text-body-sm text-on-surface">{claim.knownContents}</div>
+              </div>
+            )}
+            {claim.contextDetails && (
+              <div>
+                <p className="text-[11px] text-on-surface-variant uppercase tracking-wide mb-1">Context / Last Seen</p>
+                <div className="bg-surface-container p-2.5 rounded text-body-sm text-on-surface">{claim.contextDetails}</div>
+              </div>
+            )}
           </div>
 
           {claim.rawStatus === "pending" && (
