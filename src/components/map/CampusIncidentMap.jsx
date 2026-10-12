@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import { useEffect, useState, useMemo } from "react";
+import { MapContainer, TileLayer, Marker, Popup, Circle, CircleMarker, useMap } from "react-leaflet";
 import L from "leaflet";
 import { useAppData } from "../../context/AppDataContext";
 import { getSignedImageUrl } from "../../lib/itemService";
 import { hasValidCoords } from "../../lib/geo";
+import { getLocationHotspots, ZONE_CENTROIDS } from "../../lib/locationIntelligenceService";
 
 // ---------------------------------------------------------------------------
 // Honest placement, two tiers.
@@ -14,14 +15,6 @@ import { hasValidCoords } from "../../lib/geo";
 //    centroid. This is a zone's general area, NOT a precise location, and is
 //    labeled as such on the map. We never invent coordinates for a report.
 // ---------------------------------------------------------------------------
-const ZONE_CENTROIDS = {
-  "Central Library": [12.9345, 77.6102],
-  "CS Block": [12.9354, 77.6118],
-  "Main Canteen": [12.9338, 77.6110],
-  "Auditorium": [12.9348, 77.6096],
-  "Hostels": [12.9360, 77.6126],
-  Other: [12.9340, 77.6105],
-};
 
 const CAMPUS_BOUNDS = [
   [12.9325, 77.6085],
@@ -530,9 +523,119 @@ function IndexedMarkers({ items }) {
   );
 }
 
+// ---- Hotspot Activity Layer ---------------------------------------------------
+
+function HotspotOverlay({ hotspots }) {
+  if (!hotspots || hotspots.length === 0) return null;
+
+  return (
+    <>
+      {hotspots.map((spot) => {
+        const isHigh = spot.activityLevel === "High";
+        const isModerate = spot.activityLevel === "Moderate";
+        const color = isHigh ? "#f43f5e" : isModerate ? "#f59e0b" : "#3b82f6";
+        const fillColor = isHigh ? "#f43f5e" : isModerate ? "#f59e0b" : "#3b82f6";
+
+        return (
+          <Circle
+            key={`hotspot-${spot.zone}`}
+            center={spot.coordinates}
+            radius={spot.radiusMeters}
+            pathOptions={{
+              color,
+              fillColor,
+              fillOpacity: isHigh ? 0.18 : isModerate ? 0.13 : 0.08,
+              weight: isHigh ? 2 : 1.5,
+              dashArray: isHigh ? undefined : "4, 6",
+            }}
+          >
+            <Popup maxWidth={260} className="incident-popup">
+              <div style={{ padding: "8px 10px", fontSize: 12.5, fontFamily: "Inter, sans-serif" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                  <span style={{ fontWeight: 700, color: "#0b1c30", fontSize: 13 }}>
+                    {spot.zone}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: "2px 6px",
+                      borderRadius: 999,
+                      background: isHigh ? "rgba(244,63,94,0.15)" : "rgba(245,158,11,0.15)",
+                      color: isHigh ? "#f43f5e" : "#d97706",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {spot.activityLevel} Activity
+                  </span>
+                </div>
+                <div style={{ color: "#475569", fontSize: 12, marginBottom: 6 }}>
+                  {spot.count} active reports ({spot.lostCount} lost, {spot.foundCount} found)
+                </div>
+                <div style={{ fontSize: 10.5, color: "#64748b", fontStyle: "italic", borderTop: "1px solid rgba(0,0,0,0.08)", paddingTop: 4 }}>
+                  Area activity density (not a physical danger indicator)
+                </div>
+              </div>
+            </Popup>
+          </Circle>
+        );
+      })}
+    </>
+  );
+}
+
+// ---- Near Me User Position Layer -----------------------------------------------
+
+function NearMeOverlay({ userCoords, radiusMeters }) {
+  if (!userCoords || !hasValidCoords(userCoords.latitude, userCoords.longitude)) {
+    return null;
+  }
+
+  const center = [Number(userCoords.latitude), Number(userCoords.longitude)];
+
+  return (
+    <>
+      {/* Search Radius Circle */}
+      {radiusMeters && (
+        <Circle
+          center={center}
+          radius={radiusMeters}
+          pathOptions={{
+            color: "#0284c7",
+            fillColor: "#0284c7",
+            fillOpacity: 0.1,
+            weight: 2,
+            dashArray: "6, 6",
+          }}
+        />
+      )}
+      {/* User Position Beacon */}
+      <CircleMarker
+        center={center}
+        radius={8}
+        pathOptions={{
+          color: "#ffffff",
+          fillColor: "#0284c7",
+          fillOpacity: 1,
+          weight: 3,
+        }}
+      >
+        <Popup>
+          <div style={{ fontSize: 12, padding: "4px 6px", fontFamily: "Inter, sans-serif" }}>
+            <strong>Your Position</strong>
+            <div style={{ color: "#64748b", fontSize: 11, marginTop: 2 }}>
+              Radius: {radiusMeters}m
+            </div>
+          </div>
+        </Popup>
+      </CircleMarker>
+    </>
+  );
+}
+
 // ---- Legend ----------------------------------------------------------------------
 
-function Legend({ counts }) {
+function Legend({ counts, showHotspots, onToggleHotspots }) {
   return (
     <div
       className="leaflet-bar leaflet-control"
@@ -545,8 +648,28 @@ function Legend({ counts }) {
         boxShadow: "0 6px 18px rgba(0,0,0,0.12)",
       }}
     >
-      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", color: "#64748b", textTransform: "uppercase", marginBottom: 6 }}>
-        Legend
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", color: "#64748b", textTransform: "uppercase" }}>
+          Legend
+        </span>
+        {onToggleHotspots && (
+          <button
+            type="button"
+            onClick={onToggleHotspots}
+            style={{
+              border: "none",
+              background: showHotspots ? "rgba(244,63,94,0.12)" : "rgba(0,0,0,0.06)",
+              color: showHotspots ? "#f43f5e" : "#64748b",
+              borderRadius: 4,
+              fontSize: 10,
+              fontWeight: 600,
+              padding: "2px 6px",
+              cursor: "pointer",
+            }}
+          >
+            {showHotspots ? "Hotspots On" : "Hotspots Off"}
+          </button>
+        )}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
@@ -579,8 +702,17 @@ function Legend({ counts }) {
 
 // ---- Main component -------------------------------------------------------------
 
-export default function CampusIncidentMap({ height = "100%", activeZone = "All Campus", className, items: itemsProp }) {
+export default function CampusIncidentMap({
+  height = "100%",
+  activeZone = "All Campus",
+  className,
+  items: itemsProp,
+  userCoords = null,
+  nearMeRadius = 250,
+}) {
   const { items: ctxItems, dbLoaded } = useAppData();
+  const [showHotspots, setShowHotspots] = useState(true);
+
   // Use the caller-supplied (already filtered) items when provided, otherwise
   // fall back to the full context items so the component still works standalone.
   const items = itemsProp != null ? itemsProp : ctxItems;
@@ -591,6 +723,10 @@ export default function CampusIncidentMap({ height = "100%", activeZone = "All C
     other: items.filter((i) => i.status === "Resolved").length,
     gps: items.filter((i) => hasValidCoords(i.latitude, i.longitude)).length,
   };
+
+  const hotspots = useMemo(() => {
+    return getLocationHotspots(items);
+  }, [items]);
 
   const ready = dbLoaded && items.length > 0;
 
@@ -639,10 +775,19 @@ export default function CampusIncidentMap({ height = "100%", activeZone = "All C
           attributionControl={true}
         >
           <TileLayer url={TILE_URL} attribution={TILE_ATTR} />
+          {/* Dynamic Activity Hotspots Layer */}
+          {showHotspots && <HotspotOverlay hotspots={hotspots} />}
+          {/* User Near Me Radius Layer */}
+          <NearMeOverlay userCoords={userCoords} radiusMeters={nearMeRadius} />
+          {/* Item Markers Layer */}
           <IndexedMarkers items={items} activeZone={activeZone} />
           <MapController ready={ready} />
           <ResetButton />
-          <Legend counts={counts} />
+          <Legend
+            counts={counts}
+            showHotspots={showHotspots}
+            onToggleHotspots={() => setShowHotspots((prev) => !prev)}
+          />
         </MapContainer>
       )}
 

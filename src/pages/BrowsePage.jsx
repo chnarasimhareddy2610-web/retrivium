@@ -1,9 +1,16 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import FilterBar from "../components/search/FilterBar";
 import CampusIncidentMap from "../components/map/CampusIncidentMap";
 import FeedList from "../components/feed/FeedList";
 import SmartMatchPanel from "../components/match/SmartMatchPanel";
+import LocationInsights from "../components/location/LocationInsights";
 import { useAppData } from "../context/AppDataContext";
+import {
+  getLocationHotspots,
+  findNearbyItems,
+  resolveItemZone,
+} from "../lib/locationIntelligenceService";
+import { hasValidCoords } from "../lib/geo";
 
 export default function BrowsePage() {
   const { items } = useAppData();
@@ -12,35 +19,114 @@ export default function BrowsePage() {
   const [activeStatus, setActiveStatus] = useState("all");
   const [activeZone, setActiveZone] = useState("All Campus");
 
+  // Near Me state
+  const [userCoords, setUserCoords] = useState(null);
+  const [isNearMeActive, setIsNearMeActive] = useState(false);
+  const [nearMeRadius, setNearMeRadius] = useState(250);
+  const [geoStatus, setGeoStatus] = useState("idle"); // idle | loading | success | error
+  const [geoError, setGeoError] = useState("");
+
   const totalCount = items.length;
   const foundCount = items.filter((i) => i.status === "Found").length;
   const lostCount = items.filter((i) => i.status === "Lost").length;
 
+  // Real data hotspots computed across active loaded items
+  const hotspots = useMemo(() => {
+    return getLocationHotspots(items);
+  }, [items]);
+
+  // Handle explicit Near Me activation
+  const handleActivateNearMe = useCallback(() => {
+    setGeoError("");
+    if (typeof navigator === "undefined" || !("geolocation" in navigator)) {
+      setGeoStatus("error");
+      setGeoError("Geolocation is not supported by your browser.");
+      return;
+    }
+
+    setGeoStatus("loading");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos?.coords?.latitude;
+        const lng = pos?.coords?.longitude;
+        const accuracy = pos?.coords?.accuracy;
+
+        if (!hasValidCoords(lat, lng)) {
+          setGeoStatus("error");
+          setGeoError("Received invalid coordinates from device.");
+          return;
+        }
+
+        setUserCoords({ latitude: lat, longitude: lng, accuracy });
+        setIsNearMeActive(true);
+        setGeoStatus("success");
+      },
+      (err) => {
+        setGeoStatus("error");
+        if (err?.code === 1) {
+          setGeoError("Location permission denied. Please allow location access in your browser to use Near Me.");
+        } else if (err?.code === 2) {
+          setGeoError("Position unavailable. Ensure your GPS or location services are active.");
+        } else if (err?.code === 3) {
+          setGeoError("Location request timed out. Please try again.");
+        } else {
+          setGeoError("Could not retrieve your location.");
+        }
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  }, []);
+
+  const handleClearNearMe = useCallback(() => {
+    setIsNearMeActive(false);
+    setUserCoords(null);
+    setGeoStatus("idle");
+    setGeoError("");
+  }, []);
+
+  // Compute nearby items if Near Me is active
+  const nearbyItems = useMemo(() => {
+    if (!isNearMeActive || !userCoords) return [];
+    return findNearbyItems(userCoords, items, nearMeRadius);
+  }, [isNearMeActive, userCoords, items, nearMeRadius]);
+
+  const nearbyCount = nearbyItems.length;
+
   const filteredItems = useMemo(() => {
-    return items.filter(item => {
-      // Name search
-      if (searchQuery.trim() !== "" && !item.name.toLowerCase().includes(searchQuery.toLowerCase()) && !item.tag.toLowerCase().includes(searchQuery.toLowerCase())) {
+    // If Near Me is active, start from the nearby items set
+    let sourceItems = items;
+    if (isNearMeActive && userCoords) {
+      sourceItems = nearbyItems;
+    }
+
+    return sourceItems.filter((item) => {
+      // Name & Tag search
+      if (
+        searchQuery.trim() !== "" &&
+        !item.name.toLowerCase().includes(searchQuery.toLowerCase()) &&
+        !item.tag.toLowerCase().includes(searchQuery.toLowerCase())
+      ) {
         return false;
       }
+
       // Status filter
       if (activeStatus !== "all" && activeStatus.toLowerCase() !== item.status.toLowerCase()) {
         return false;
       }
-      // Zone filter (case-insensitive, since item.location may be free-text cased any way)
+
+      // Zone filter: prioritize structured item.zone, with backward-compatible text fallback
       if (activeZone !== "All Campus") {
-        const loc = item.location.toLowerCase();
-         if (activeZone === "Central Library" && !loc.includes("library")) return false;
-         if (activeZone === "CS Block" && !loc.includes("cs block")) return false;
-         if (activeZone === "Main Canteen" && !loc.includes("canteen")) return false;
-         if (activeZone === "Auditorium" && !loc.includes("auditorium")) return false;
-         if (activeZone === "Hostels" && !loc.includes("hostel")) return false;
+        const resolved = resolveItemZone(item);
+        if (resolved !== activeZone) {
+          return false;
+        }
       }
+
       return true;
     });
-  }, [items, searchQuery, activeStatus, activeZone]);
+  }, [items, searchQuery, activeStatus, activeZone, isNearMeActive, userCoords, nearbyItems]);
 
   const handleFocusItem = (itemId) => {
-    // Focus the item in the list/map by id. Returns true if a match was found.
     return filteredItems.some((item) => item.id === itemId);
   };
 
@@ -60,12 +146,31 @@ export default function BrowsePage() {
         lostCount={lostCount}
       />
 
+      {/* Location Intelligence Telemetry & Near Me Bar */}
+      <LocationInsights
+        hotspots={hotspots}
+        totalActiveCount={lostCount + foundCount}
+        lostCount={lostCount}
+        foundCount={foundCount}
+        userCoords={userCoords}
+        isNearMeActive={isNearMeActive}
+        nearMeRadius={nearMeRadius}
+        nearbyCount={nearbyCount}
+        onActivateNearMe={handleActivateNearMe}
+        onClearNearMe={handleClearNearMe}
+        onChangeRadius={(rad) => setNearMeRadius(rad)}
+        geoStatus={geoStatus}
+        geoError={geoError}
+      />
+
       {viewMode === "map" ? (
         <CampusIncidentMap
           height="100%"
           activeZone={activeZone}
           items={filteredItems}
           onFocusItem={handleFocusItem}
+          userCoords={isNearMeActive ? userCoords : null}
+          nearMeRadius={nearMeRadius}
         />
       ) : (
         <div className="w-full max-w-3xl mx-auto py-6 px-4 space-y-6">
